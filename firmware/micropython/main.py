@@ -58,6 +58,63 @@ try:
 except Exception as e:
     print("OLED configuration failed:", e)
 
+# ----------------- SD Card Setup -----------------
+sd_present = False
+sd_mounted = False
+sd_card_obj = None
+
+def mount_sd():
+    global sd_present, sd_mounted, sd_card_obj
+    if sd_mounted:
+        return True
+    try:
+        from machine import SPI
+        import sdcard
+        import os
+        # CS on GP28 (D2), SPI0 on GP2 (D8), GP3 (D9), GP4 (D10)
+        cs = Pin(28, Pin.OUT, value=1)
+        spi = SPI(0, baudrate=10000000, polarity=0, phase=0, sck=Pin(2), mosi=Pin(3), miso=Pin(4))
+        sd_card_obj = sdcard.SDCard(spi, cs)
+        os.mount(sd_card_obj, "/sd")
+        sd_mounted = True
+        sd_present = True
+        print("SD Card mounted successfully at /sd")
+        return True
+    except Exception as e:
+        sd_mounted = False
+        sd_card_obj = None
+        print("SD Card mount failed:", e)
+        return False
+
+def unmount_sd():
+    global sd_mounted, sd_card_obj
+    if not sd_mounted:
+        return True
+    try:
+        import os
+        os.umount("/sd")
+        sd_mounted = False
+        sd_card_obj = None
+        print("SD Card unmounted successfully.")
+        return True
+    except Exception as e:
+        print("SD Card unmount failed:", e)
+        return False
+
+def ensure_sd_pins():
+    if not sd_mounted:
+        return False
+    try:
+        from machine import SPI
+        Pin(28, Pin.OUT, value=1)
+        SPI(0, baudrate=10000000, polarity=0, phase=0, sck=Pin(2), mosi=Pin(3), miso=Pin(4))
+        return True
+    except Exception:
+        return False
+
+# Attempt to mount SD card at boot
+mount_sd()
+
 def trigger_transition_wipe():
     if oled_present and oled is not None:
         try:
@@ -109,6 +166,45 @@ poll.register(uart, select.POLLIN)
 screen = 0  
 tx_bytes = 0
 rx_bytes = 0
+
+# ----------------- UART Logger State -----------------
+logging_active = False
+log_buffer = bytearray()
+last_log_write_t = 0
+
+def log_uart_data(data):
+    global log_buffer, last_log_write_t, logging_active
+    if not logging_active or not sd_mounted:
+        return
+    if isinstance(data, str):
+        log_buffer.extend(data.encode())
+    else:
+        log_buffer.extend(data)
+    now = time.ticks_ms()
+    if len(log_buffer) >= 64 or (time.ticks_diff(now, last_log_write_t) > 500 and len(log_buffer) > 0):
+        flush_log_buffer()
+
+def flush_log_buffer():
+    global log_buffer, last_log_write_t, logging_active
+    if len(log_buffer) == 0 or not sd_mounted:
+        return
+    try:
+        import os
+        ensure_sd_pins()
+        with open("/sd/uart_log.txt", "ab") as f:
+            f.write(log_buffer)
+        log_buffer = bytearray()
+        last_log_write_t = time.ticks_ms()
+    except Exception as e:
+        print("Logger write failed, stopping logger:", e)
+        logging_active = False
+        log_buffer = bytearray()
+        beep(1000, 200)
+
+def draw_rec_indicator(oled, anim_tick):
+    if logging_active and (anim_tick // 4) % 2 == 0:
+        oled.fill_rect(92, 4, 4, 4, 1)
+        oled.text("REC", 98, 2)
 
 # Demo Mode status
 demo_mode = bridge_cfg.get("demo_on_boot", False)
@@ -291,6 +387,61 @@ def scan_i2c():
         except Exception:
             pass
 
+# ----------------- Screen 9 SD Explorer State -----------------
+sd_menu_items = []
+sd_menu_idx = 0
+sd_confirm_pending = False
+sd_confirm_t = 0
+
+sd_view_active = False
+sd_view_file = ""
+sd_view_offset = 0
+
+def get_file_lines(path, start_line, num_lines=4):
+    lines = []
+    try:
+        ensure_sd_pins()
+        with open(path, "r") as f:
+            for _ in range(start_line):
+                if not f.readline():
+                    break
+            for _ in range(num_lines):
+                line = f.readline()
+                if not line:
+                    break
+                clean_line = line.replace("\t", "    ").rstrip("\r\n")
+                lines.append(clean_line)
+    except Exception:
+        pass
+    return lines
+
+def prepare_sd_explorer():
+    global sd_menu_items, sd_menu_idx, sd_confirm_pending, sd_view_active
+    sd_menu_idx = 0
+    sd_confirm_pending = False
+    sd_view_active = False
+    
+    # Auto-mount
+    mount_sd()
+    ensure_sd_pins()
+    
+    sd_menu_items = ["< BACK"]
+    if sd_mounted:
+        if logging_active:
+            sd_menu_items.append("[STOP LOGGING]")
+        else:
+            sd_menu_items.append("[START LOGGING]")
+        
+        try:
+            import os
+            files = sorted(os.listdir("/sd"))
+            for f in files:
+                sd_menu_items.append(f)
+        except Exception:
+            pass
+    else:
+        sd_menu_items.append("[RETRY MOUNT]")
+
 # ----------------- Analog Oscilloscope Setup -----------------
 adc = ADC(Pin(26))  # A0 (GP26)
 osc_samples = [62] * 80  # sweep x=0..79, height y=14..62
@@ -347,7 +498,10 @@ def apply_signal_generator():
             except Exception:
                 pass
             pwm_gen = None
-        Pin(28, Pin.OUT).value(0)
+        if sd_mounted:
+            Pin(28, Pin.OUT, value=1)
+        else:
+            Pin(28, Pin.OUT).value(0)
     else:
         try:
             pwm_gen = PWM(Pin(28))
@@ -470,11 +624,28 @@ def handle_short_press():
         demo_trigger_idx = (demo_trigger_idx + 1) % len(demo_trigger_items)
         demo_trigger_confirm_t = time.ticks_ms() + 2000
         demo_trigger_confirm_pending = True
+    elif screen == 9:
+        # SD Card Explorer
+        global sd_view_active, sd_view_offset, sd_view_file, sd_menu_idx, sd_confirm_t, sd_confirm_pending
+        if sd_view_active:
+            sd_view_offset += 4
+            lines = get_file_lines("/sd/" + sd_view_file, sd_view_offset, num_lines=4)
+            if not lines:
+                sd_view_active = False
+                beep(1200, 60)
+            else:
+                beep(1800, 15)
+        else:
+            if len(sd_menu_items) > 0:
+                sd_menu_idx = (sd_menu_idx + 1) % len(sd_menu_items)
+                sd_confirm_t = time.ticks_ms() + 2000
+                sd_confirm_pending = True
 
 def handle_long_press():
     global screen, menu_idx, baud_confirm_pending
     global macro_idx, macro_confirm_pending, gpio_sel_idx
     global demo_trigger_confirm_pending, demo_trigger_idx
+    global sd_confirm_pending, sd_view_active
     
     if demo_mode:
         exit_demo()
@@ -489,12 +660,14 @@ def handle_long_press():
     baud_confirm_pending = False
     macro_confirm_pending = False
     demo_trigger_confirm_pending = False
+    sd_confirm_pending = False
+    sd_view_active = False
     gpio_sel_idx = -1
     
     trigger_transition_wipe()
     
-    # Switch screen (9 screens total)
-    screen = (screen + 1) % 9
+    # Switch screen (10 screens total)
+    screen = (screen + 1) % 10
     
     # Entry prepares
     if screen == 2:
@@ -505,13 +678,15 @@ def handle_long_press():
         menu_idx = 0
     elif screen == 8:
         demo_trigger_idx = 0
+    elif screen == 9:
+        prepare_sd_explorer()
 
 # ----------------- Host JSON Line Interface -----------------
 # Buffer to assemble incoming host serial lines
 usb_rx_buf = ""
 
 def process_host_command(line):
-    global BAUDRATE, macro_items, bridge_cfg, demo_mode, last_demo_switch_t, screen, tx_bytes, rx_bytes
+    global BAUDRATE, macro_items, bridge_cfg, demo_mode, last_demo_switch_t, screen, tx_bytes, rx_bytes, logging_active
     try:
         data = json.loads(line)
         if "cfg" in data:
@@ -551,6 +726,15 @@ def process_host_command(line):
             if "demo_on_boot" in cfg:
                 bridge_cfg["demo_on_boot"] = bool(cfg["demo_on_boot"])
                 changed = True
+
+            # 5. Toggle UART Logging
+            if "logging" in cfg:
+                logging_active = bool(cfg["logging"])
+                if logging_active:
+                    mount_sd()
+                else:
+                    flush_log_buffer()
+                changed = True
             
             if changed:
                 save_bridge_cfg(bridge_cfg)
@@ -560,7 +744,7 @@ def process_host_command(line):
                 beep(3000, 40)
                 
                 # Print response back to host
-                res = {"status": "OK", "baud": BAUDRATE, "macros": bridge_cfg["macros"], "demo": demo_mode, "demo_on_boot": bridge_cfg.get("demo_on_boot", False)}
+                res = {"status": "OK", "baud": BAUDRATE, "macros": bridge_cfg["macros"], "demo": demo_mode, "demo_on_boot": bridge_cfg.get("demo_on_boot", False), "logging": logging_active}
                 print("\r\n" + json.dumps(res) + "\r\n")
                 
                 # Reset local visual selectors
@@ -619,7 +803,7 @@ try:
             if time.ticks_diff(now_ms, last_demo_switch_t) > 7000:
                 last_demo_switch_t = now_ms
                 trigger_transition_wipe()
-                screen = (screen + 1) % 9
+                screen = (screen + 1) % 10
                 beep(1800, 20)
                 
                 # Configure screens automatically for full visual loading
@@ -631,6 +815,10 @@ try:
                     # Alternate between Pin Grid Monitor (-1) and Logic Analyzer Probe on D0 (0)
                     gpio_sel_idx = 0 if gpio_sel_idx == -1 else -1
                     logic_samples = [48] * 80
+                elif screen == 9:
+                    sd_menu_items = ["< BACK", "[START LOGGING]", "demo_log.csv", "sys_info.txt"]
+                    sd_menu_idx = 0
+                    sd_view_active = False
             
             # 2. Simulate activity ticks
             anim_tick += 1  # speed up animations
@@ -678,6 +866,10 @@ try:
             elif screen == 8:
                 # Cycle Demo Trigger highlight to simulate interaction
                 demo_trigger_idx = (anim_tick // 15) % len(demo_trigger_items)
+            elif screen == 9:
+                # Cycle SD Explorer highlight to simulate interaction
+                if sd_menu_items:
+                    sd_menu_idx = (anim_tick // 15) % len(sd_menu_items)
         
         # ----------------- Confirm Baud Select -----------------
         if screen == 7 and baud_confirm_pending and time.ticks_diff(now_ms, baud_confirm_t) > 0:
@@ -735,6 +927,7 @@ try:
                 macro_text = macro_items[macro_idx]
                 uart.write(macro_text + "\r\n")
                 tx_bytes += len(macro_text) + 2
+                log_uart_data(macro_text + "\r\n")
                 last_activity_t = time.ticks_ms()
                 last_type = "TX"
                 
@@ -797,6 +990,35 @@ try:
                     time.sleep_ms(1500)
                 reset()
 
+        # ----------------- Confirm SD Explorer -----------------
+        if screen == 9 and sd_confirm_pending and time.ticks_diff(now_ms, sd_confirm_t) > 0:
+            sd_confirm_pending = False
+            item_text = sd_menu_items[sd_menu_idx]
+            if item_text == "< BACK":
+                beep(1200, 60)
+                screen = 0
+                trigger_transition_wipe()
+            elif item_text == "[RETRY MOUNT]":
+                prepare_sd_explorer()
+                beep(2000, 30)
+            elif item_text == "[START LOGGING]":
+                logging_active = True
+                beep(2400, 30)
+                time.sleep_ms(50)
+                beep(2800, 30)
+                prepare_sd_explorer()
+            elif item_text == "[STOP LOGGING]":
+                flush_log_buffer()
+                logging_active = False
+                beep(1200, 80)
+                prepare_sd_explorer()
+            else:
+                sd_view_file = item_text
+                sd_view_offset = 0
+                sd_view_active = True
+                beep(2200, 30)
+                trigger_transition_wipe()
+
         # ----------------- Bidirectional USB <-> UART Bridge -----------------
         events = poll.poll(0)  # 100% non-blocking
         for fd, event in events:
@@ -816,6 +1038,7 @@ try:
                             if line:
                                 uart.write(line + "\n")
                                 tx_bytes += len(line) + 1
+                                log_uart_data(line + "\n")
                                 last_activity_t = time.ticks_ms()
                                 last_type = "TX"
                                 set_leds(False, True, False)
@@ -827,6 +1050,7 @@ try:
                         # Standard raw forwarding on character bounds (character mode)
                         uart.write(char)
                         tx_bytes += len(char)
+                        log_uart_data(char)
                         last_activity_t = time.ticks_ms()
                         last_type = "TX"
                         set_leds(False, True, False)
@@ -837,6 +1061,7 @@ try:
                     if data:
                         sys.stdout.buffer.write(data)
                         rx_bytes += len(data)
+                        log_uart_data(data)
                         last_activity_t = time.ticks_ms()
                         last_type = "RX"
                         for b in data:
@@ -847,6 +1072,10 @@ try:
                                 hex_history.pop(0)
                         set_leds(False, True, False)
         
+        # Periodic log flush check
+        if logging_active and len(log_buffer) > 0 and time.ticks_diff(now_ms, last_log_write_t) > 500:
+            flush_log_buffer()
+
         # Restore solid idle status colors
         activity_age = time.ticks_diff(time.ticks_ms(), last_activity_t)
         is_active = activity_age < 800
@@ -900,6 +1129,8 @@ try:
                 oled.text("[ UART BRIDGE ]", 4, 2)
                 if demo_mode:
                     oled.text("DEMO", 100, 2)
+                else:
+                    draw_rec_indicator(oled, anim_tick)
                 oled.hline(0, 11, 128, 1)
                 oled.text(f"Baud:{BAUDRATE}", 4, 16)
                 oled.text(f"TX:  {fmt_bytes(tx_bytes)}B", 4, 28)
@@ -915,6 +1146,8 @@ try:
                 oled.text(title, 6, 2)
                 if demo_mode:
                     oled.text("DEMO", 100, 2)
+                else:
+                    draw_rec_indicator(oled, anim_tick)
                 oled.hline(0, 11, 128, 1)
                 if sniffer_mode == 0:
                     for idx, line in enumerate(terminal_lines):
@@ -1233,6 +1466,49 @@ try:
                     rem_t = max(0, time.ticks_diff(demo_trigger_confirm_t, time.ticks_ms()))
                     bar_w = int(128 * (rem_t / 2000))
                     oled.hline(0, 63, bar_w, 1)
+                oled.show()
+                
+            elif screen == 9:
+                # SCREEN 9: SD CARD FILE EXPLORER
+                oled.fill(0)
+                oled.text("[ SD EXPLORER ]", 4, 2)
+                if demo_mode:
+                    oled.text("DEMO", 100, 2)
+                else:
+                    draw_rec_indicator(oled, anim_tick)
+                oled.hline(0, 11, 128, 1)
+                
+                if sd_view_active:
+                    title = f"/{sd_view_file[:10]}"
+                    oled.text(f"VIEW: {title}", 4, 14)
+                    oled.hline(0, 23, 128, 1)
+                    
+                    lines = get_file_lines("/sd/" + sd_view_file, sd_view_offset, num_lines=4)
+                    if not lines:
+                        oled.text("(end of file)", 4, 32)
+                    else:
+                        for idx, line in enumerate(lines):
+                            oled.text(line[:16], 4, 26 + idx * 9)
+                    oled.text("ShortPress: scroll", 4, 56)
+                else:
+                    start_item = max(0, sd_menu_idx - 3)
+                    if start_item + 4 > len(sd_menu_items):
+                        start_item = len(sd_menu_items) - 4
+                    if start_item < 0:
+                        start_item = 0
+                        
+                    for idx in range(start_item, min(start_item + 4, len(sd_menu_items))):
+                        y = 16 + (idx - start_item) * 12
+                        prefix = "> " if idx == sd_menu_idx else "  "
+                        item_text = sd_menu_items[idx]
+                        if len(item_text) > 14:
+                            item_text = item_text[:11] + "..."
+                        oled.text(prefix + item_text, 4, y)
+                        
+                    if sd_confirm_pending:
+                        rem_t = max(0, time.ticks_diff(sd_confirm_t, time.ticks_ms()))
+                        bar_w = int(128 * (rem_t / 2000))
+                        oled.hline(0, 63, bar_w, 1)
                 oled.show()
 
 except Exception as err:
