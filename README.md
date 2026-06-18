@@ -1,0 +1,129 @@
+# XIAO UART Bridge & Pocket Debugging Suite 🛠️
+
+This directory contains the custom MicroPython bridge firmware designed to turn a **Seeed Studio XIAO RP2040** mounted on its **base expansion board** into an interactive serial adapter and pocket debugging suite.
+
+---
+
+## 🌟 Visual Layout & Features
+
+1. **USB-to-UART Bridge (Screen 0)**:
+   * Bridges USB-CDC with physical UART0.
+   * **Sleeping/Idle Cat Mascot**: A pixel cat curls up to sleep and floats `"z Z Z"` characters if there is no data flow.
+   * **Active Data**: On transfer, the cat wakes up, opens its eyes, moves its mouth, and displays a flashing `TX` or `RX` speech bubble.
+   * **Short Press**: Clears current TX/RX byte statistics.
+2. **Terminal Sniffer Log (Screen 1)**:
+   * Displays a rolling 5-line terminal log of incoming raw ASCII data.
+   * **Short Press**: Toggles between **ASCII Text Mode** (scrolling letters) and **Hex Dump Mode** (shows hex values paired with ASCII characters: `HH HH HH HH AAAA`).
+3. **I2C Bus Scanner (Screen 2)**:
+   * Scans the I2C bus (GP6/GP7) in the background every 1.5 seconds. Identifies known sensors (e.g. BMP280, MPU6050, SHT30) and lists their addresses.
+   * **Short Press**: Triggers an immediate re-scan.
+4. **Analog Oscilloscope (Screen 3)**:
+   * Plots a real-time scrolling waveform of the voltage sampled from pin **A0 (GP26)** (0V to 3.3V).
+   * **Calculated Waveform Stats**: Displays **Max Voltage (Vmax)**, **Min Voltage (Vmin)**, **Peak-to-Peak (Vpp)**, and **Signal Frequency (Hz/kHz)** using mathematical zero-crossing edge calculations.
+   * **Short Press**: Cycles through timebases and freeze states:
+     - `1ms/div` (100us sample bursts, total sweep = 8ms)
+     - `10ms/div` (1ms sample bursts, total sweep = 80ms)
+     - `100ms/div` (10ms samples, background sweep = 800ms)
+     - `FREEZE` (holds the last captured sweep snapshot)
+5. **GPIO State Monitor (Screen 4)**:
+   * Displays a real-time high/low status grid of all 11 physical pins on the XIAO header.
+   * **Short Press**: Moves the cursor (`>`) to highlight a specific pin.
+   * **Interactive Logic Probe**: If you let the cursor stay on a pin, it enters a dedicated **Logic Analyzer Probe screen** that draws a 1-bit scrolling waveform chart (High/Low) over time for that pin. Short-press inside the probe screen to return to the GPIO grid.
+6. **PWM Signal Lab (Screen 5)**:
+   * **PWM Generator (D2 / GP28)**: Outputs a 50% duty-cycle square wave on pin **D2 (GP28)**. Cycles frequencies on short-press: `OFF`, `50Hz`, `100Hz`, `500Hz`, `1kHz`, `5kHz`, `10kHz`, `20kHz`.
+   * **PWM/Duty Meter (D8 / GP2)**: Uses high-speed hardware input timers (`time_pulse_us`) on pin **D8 (GP2)** to measure and display the frequency and duty cycle of any incoming PWM signal in real-time.
+7. **Command Macro Sender (Screen 6)**:
+   * Sends customizable serial macros (loaded from `bridge_cfg.json`) to the target device.
+   * **Demo Mode Trigger**: Select **DEMO MODE** at the bottom of the list and wait 2 seconds to launch the Technical Demo.
+   * **Short Press**: Cycles through options.
+   * **Auto-Apply**: Leaving the cursor on a macro for **2 seconds** transmits the string (`MACRO_TEXT\r\n`) and returns to Screen 0.
+8. **Baud Rate Selector (Screen 7)**:
+   * Selects the active bridge speed (`9600`, `19200`, `38400`, `57600`, `115200`).
+   * **Short Press**: Cycles through options.
+   * **Auto-Apply**: Leaving the cursor on an option for **2 seconds** re-initializes the UART and returns to Screen 0.
+9. **Demo Trigger App (Screen 8)**:
+   * Instantly starts the technical demo or sets up boot configuration settings.
+   * **Short Press**: Cycles through options:
+     - `START NOW`: Starts the Demo Mode immediately.
+     - `BOOT & RUN`: Persistently configures the board to boot directly into Demo Mode, then soft-resets the board.
+     - `< CANCEL`: Cancels and returns to Screen 0.
+   * **Auto-Apply**: Leaving the cursor on an option for **2 seconds** executes the action.
+
+---
+
+## 🕹️ System Controls
+
+*   **SHORT PRESS (< 400ms)**: Cycles options, clears stats, toggles views, or enters logic probes.
+*   **LONG PRESS (>= 500ms)**: Cycles to the **next tool** (Screen 0 $\rightarrow$ 1 $\rightarrow$ 2 $\rightarrow$ 3 $\rightarrow$ 4 $\rightarrow$ 5 $\rightarrow$ 6 $\rightarrow$ 7 $\rightarrow$ 8 $\rightarrow$ 0).
+*   **Buzzer Feedback**: 
+    *   *Click*: Plays on button press.
+    *   *Rising pitch slide*: Plays when switching screens.
+    *   *Success chime*: Plays when a Baud rate is applied, a Macro is sent, or config is updated.
+    *   *Flat click*: Plays on cancellations.
+
+---
+
+## 🔌 Pin Configuration & Wiring
+
+Connect the bridge to your target microcontroller (e.g. Raspberry Pi Pico W):
+
+| Expansion Shield Pin | Direction | Target Pin | Function |
+| :--- | :--- | :--- | :--- |
+| **D6** (XIAO TX / GP0) | $\rightarrow$ | Target **RX** | UART Transmit |
+| **D7** (XIAO RX / GP1) | $\leftarrow$ | Target **TX** | UART Receive |
+| **GND** | $\leftrightarrow$ | Target **GND** | Common Ground Reference |
+| **A0** (GP26) | $\leftarrow$ | Test Signal | Oscilloscope Probe Input (0V–3.3V) |
+| **D2** (GP28) | $\rightarrow$ | Test Input | PWM Signal Generator Output |
+| **D8** (GP2) | $\leftarrow$ | Test Signal | PWM & Duty Cycle Meter Input |
+
+---
+
+## 💻 Host JSON Configuration Mode
+
+You can configure the bridge on-the-fly from your host machine over USB. If you send a JSON line starting with `{"cfg": ...}`, the bridge intercepts it and saves it persistently to `bridge_cfg.json` on flash.
+
+#### Examples:
+1.  **Configure Custom Macros**:
+    ```bash
+    echo '{"cfg": {"macros": ["AT", "AT+GMR", "PING", "RESET"]}}' > /dev/cu.usbmodem21201
+    ```
+2.  **Adjust Baudrate**:
+    ```bash
+    echo '{"cfg": {"baud": 9600}}' > /dev/cu.usbmodem21201
+    ```
+3.  **Toggle Demo Mode**:
+    ```bash
+    # Enable Technical Demo Mode:
+    echo '{"cfg": {"demo": true}}' > /dev/cu.usbmodem21201
+    
+    # Disable Technical Demo Mode:
+    echo '{"cfg": {"demo": false}}' > /dev/cu.usbmodem21201
+    ```
+4.  **Configure Reboot to Demo**:
+    ```bash
+    # Configure board to reboot directly into Demo Mode:
+    echo '{"cfg": {"demo_on_boot": true}}' > /dev/cu.usbmodem21201
+    
+    # Disable Demo Mode on boot:
+    echo '{"cfg": {"demo_on_boot": false}}' > /dev/cu.usbmodem21201
+    ```
+The board will chime and return a JSON status line confirming the updated config.
+
+---
+
+## 🎬 Technical Demo Mode
+
+Demo Mode is a comprehensive visual demonstration designed to show off all of the bridge's capabilities under a simulated full load. 
+
+*   **Activation**: Triggered by waiting 2 seconds on the **DEMO MODE** macro item, using the **Demo Trigger App (Screen 8)** (`START NOW` or `BOOT & RUN`), or by sending `{"cfg": {"demo": true}}` or `{"cfg": {"demo_on_boot": true}}` over USB CDC.
+*   **Behavior**: It automatically cycles through all 9 screens, displaying each state for **7 seconds**.
+*   **Simulated Loads**:
+    *   **Screen 0 (Mascot/Stats)**: Shows simulated byte transfers, updating the RX/TX statistics while the mascot wakes up and flashes speech bubbles.
+    *   **Screen 1 (Sniffer)**: Automatically alternates between ASCII RX logging and Hex Sniffer modes on each cycle, displaying a simulated stream of incoming telemetry and command responses.
+    *   **Screen 2 (I2C Scanner)**: Lists a mockup of active I2C addresses on the bus.
+    *   **Screen 3 (Oscilloscope)**: Displays a smooth math-generated sine wave, calculating frequency and voltage stats in real-time.
+    *   **Screen 4 (GPIO Monitor)**: Simulates active logic level states across headers, alternating between the grid view and a pulsing 1-bit scrolling Logic Probe view on pin D0.
+    *   **Screen 5 (PWM Lab)**: Illustrates a stable PWM wave input (1.0kHz @ 50.0% duty) alongside generator animation.
+    *   **Screen 6/7 (Menus)**: Animates the selection cursor cycling through options to demonstrate navigation.
+    *   **Screen 8 (Demo Trigger)**: Cycles the selection highlight between trigger commands.
+*   **Interaction**: Pressing the physical button (short or long press) at any point during the demo **instantly exits** Demo Mode and resets the device.
