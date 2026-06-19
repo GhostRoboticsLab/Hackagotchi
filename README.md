@@ -8,12 +8,13 @@ This directory contains the custom MicroPython bridge firmware designed to turn 
 
 1. **USB-to-UART Bridge (Screen 0)**:
    * Bridges USB-CDC with physical UART0.
+   * **Stats panel**: Baud, TX bytes, RX bytes, and **uptime** down the left column.
    * **Sleeping/Idle Cat Mascot**: A pixel cat curls up to sleep and floats `"z Z Z"` characters if there is no data flow.
    * **Active Data**: On transfer, the cat wakes up, opens its eyes, moves its mouth, and displays a flashing `TX` or `RX` speech bubble.
    * **Short Press**: Clears current TX/RX byte statistics.
 2. **Terminal Sniffer Log (Screen 1)**:
-   * Displays a rolling 5-line terminal log of incoming raw ASCII data.
-   * **Short Press**: Toggles between **ASCII Text Mode** (scrolling letters) and **Hex Dump Mode** (shows hex values paired with ASCII characters: `HH HH HH HH AAAA`).
+   * Displays a rolling **6-line** terminal log of incoming raw ASCII data (21 cols/line in the compact 5×7 font).
+   * **Short Press**: Toggles between **ASCII Text Mode** (scrolling letters) and **Hex Dump Mode** (**6 rows × 5 bytes** with an ASCII gutter: `HH HH HH HH HH AAAAA`).
 3. **I2C Bus Scanner (Screen 2)**:
    * Scans the I2C bus (GP6/GP7) in the background every 1.5 seconds. Identifies known sensors (e.g. BMP280, MPU6050, SHT30) and lists their addresses.
    * **Short Press**: Triggers an immediate re-scan.
@@ -108,6 +109,27 @@ You can configure the bridge on-the-fly from your host machine over USB. If you 
     echo '{"cfg": {"demo_on_boot": false}}' > /dev/cu.usbmodem21201
     ```
 The board will chime and return a JSON status line confirming the updated config.
+
+---
+
+## 🎮 Driving the PicoInky (reverse channel)
+
+The bridge transmits to the target's RX (**D6 / GP0 → Pico GP1**), and PicoInky firmware
+(≥ the stock-MicroPython base) listens there for **single-character control commands** —
+a refresh-immune control plane that works *during* an e-paper refresh or TLS fetch, when a
+USB raw-REPL break-in would fail. Bytes are dispatched by `App._drain_uart_cmds`; acks come
+back as `cmd ...` lines on the telemetry stream (visible in the Sniffer screen):
+
+| Key | Action |
+| :-- | :--- |
+| `n` / `p` | Next / previous page |
+| `r` | Mark all feeds due → refetch on the next poll |
+| `g` | `gc.collect()` then report free / allocated RAM |
+| `d` | Dump a compact state snapshot (page, key list, free RAM) |
+| `R` | Reboot the Pico |
+
+Send them either from the host (`echo -n n > /dev/cu.usbmodem21201`) or straight from the
+bridge by loading them as **macros** (Screen 6): `{"cfg": {"macros": ["n", "p", "r", "g", "d"]}}`.
 
 ---
 
