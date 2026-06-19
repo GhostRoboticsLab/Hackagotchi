@@ -112,6 +112,16 @@ echo '{"q":"freeze"}'   > /dev/cu.usbmodem21201   # -> {"status":"OK","n":96,"he
 
 Host-command lines (`{...}`) are intercepted whole and are **not** forwarded to the target — they won't leak bytes onto its RX line.
 
+A companion CLI wraps all of this (auto-detects the bridge port):
+
+```bash
+.venv/bin/python tools/pockettap_ctl.py status        # state snapshot
+.venv/bin/python tools/pockettap_ctl.py freeze         # hexdump the target's last words
+.venv/bin/python tools/pockettap_ctl.py screen 3       # jump to a screen
+.venv/bin/python tools/pockettap_ctl.py clear          # reset stats
+.venv/bin/python tools/pockettap_ctl.py watch          # live-tail relayed telemetry
+```
+
 #### Examples:
 1.  **Configure Custom Macros**:
     ```bash
