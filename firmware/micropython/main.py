@@ -1196,6 +1196,30 @@ def process_host_command(line):
                 global menu_items
                 menu_items = ["< CANCEL"] + [str(b) for b in BAUDRATES]
                 return True
+
+        # Host screen control: jump the bridge to any screen (the cheapest fix for the
+        # single-button UX ceiling -- a companion app can drive navigation over USB).
+        if "screen" in data:
+            try:
+                n = int(data["screen"])
+            except Exception:
+                n = -1
+            if 0 <= n < SCREEN_COUNT:
+                demo_mode = False          # host control implies manual mode
+                screen = n
+                beep(2600, 30)
+                print("\r\n" + json.dumps({"status": "OK", "screen": screen}) + "\r\n")
+                return True
+
+        # Host status query (no state change): glanceable bridge state over USB, so a
+        # companion app / script can monitor the recorder without reading the OLED.
+        if data.get("q") == "status":
+            st = {"status": "OK", "fw": "PocketTap", "screen": screen, "demo": demo_mode,
+                  "baud": BAUDRATE, "tx": tx_bytes, "rx": rx_bytes,
+                  "logging": logging_active, "log_file": current_log_filename,
+                  "sd": sd_mounted, "tp_peak": tp_peak}
+            print("\r\n" + json.dumps(st) + "\r\n")
+            return True
     except Exception as e:
         print(json.dumps({"status": "error", "msg": str(e)}))
     return False
@@ -1515,8 +1539,10 @@ while True:
                     if c == "\n":
                         line = usb_rx_buf.strip()
                         usb_rx_buf = ""
-                        # If a config command, intercept it
-                        if line.startswith('{"cfg":') and process_host_command(line):
+                        # If a host command (JSON line: {"cfg":..}/{"screen":N}/{"q":"status"}),
+                        # intercept it; process_host_command returns False for anything else, so
+                        # genuine JSON destined for the target still falls through to the UART.
+                        if line.startswith('{') and line.endswith('}') and process_host_command(line):
                             continue
                         else:
                             # Forward leftover line to UART
