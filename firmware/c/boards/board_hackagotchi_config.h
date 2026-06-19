@@ -1,10 +1,10 @@
-// board_pockettap_config.h — DRAFT XIAO RP2040 board config for the PocketDebugger fork.
+// board_hackagotchi_config.h — DRAFT XIAO RP2040 board config for the Hackagotchi fork.
 //
 // This replaces debugprobe's stock board_pico_config.h (SWCLK=GP2, SWDIO=GP3, RESET=GP1,
-// UART=GP4/GP5) — EVERY stock pin collides with PocketTap. See docs/engineering-plan.md §6.
+// UART=GP4/GP5) — EVERY stock pin collides with Hackagotchi. See docs/engineering-plan.md §6.
 //
 // ┌──────────────────────────────────────────────────────────────────────────────────────┐
-// │ CURRENT PocketTap pin usage (XIAO RP2040 + expansion) — what SWD must avoid:           │
+// │ CURRENT Hackagotchi pin usage (XIAO RP2040 + expansion) — what SWD must avoid:           │
 // │   GP0  (D6)  UART0 TX  -> target tap            GP1  (D7)  UART0 RX  -> target tap      │
 // │   GP2  (D8)  SD SPI SCK                          GP3  (D10) SD SPI MOSI                 │
 // │   GP4  (D9)  SD SPI MISO                         GP28 (D2)  SD CS / PWM-gen out         │
@@ -25,8 +25,8 @@
 //   * Only SWCLK, SWDIO, GND are mandatory (3-wire). RESET is optional (connect-under-reset).
 //
 // Candidate (reclaims GP26=green-LED+ADC-scope and GP27=button — confirm this trade at solder time):
-#ifndef BOARD_POCKETTAP_CONFIG_H
-#define BOARD_POCKETTAP_CONFIG_H
+#ifndef BOARD_HACKAGOTCHI_CONFIG_H
+#define BOARD_HACKAGOTCHI_CONFIG_H
 
 // --- SWD (TBD — reconcile these MACRO NAMES with the actual debugprobe-v2.2.3 board header) ---
 #define PROBE_PIN_SWCLK   26   // TODO(solder): candidate — verify reach + adjacency + free
@@ -46,7 +46,7 @@
 #define PROBE_SM           0
 
 // NOTE: the OLED (I2C GP6/GP7), microSD (SPI0 GP2/3/4/CS28), RTC, buzzer, and button are driven
-// by the PocketTap DASHBOARD task (added at Gate 1+), NOT by the probe core. The probe owns
+// by the Hackagotchi DASHBOARD task (added at Gate 1+), NOT by the probe core. The probe owns
 // pio0 SM0 + the SWD/UART/LED pins above; the dashboard must avoid those. See engineering-plan §4.1.
 
-#endif // BOARD_POCKETTAP_CONFIG_H
+#endif // BOARD_HACKAGOTCHI_CONFIG_H

@@ -1,14 +1,14 @@
-# PocketTap case — "Field Recorder"
+# Hackagotchi case — "Field Recorder"
 
-A minimal pocket enclosure for **PocketTap** (Seeed XIAO RP2040 + Expansion Board: 128×64
-OLED, microSD, PCF8563 RTC + CR1220, buzzer, user button). Source: `case/pockettap_case.scad`.
+A minimal pocket enclosure for **Hackagotchi** (Seeed XIAO RP2040 + Expansion Board: 128×64
+OLED, microSD, PCF8563 RTC + CR1220, buzzer, user button). Source: `case/hackagotchi_case.scad`.
 
 ## The form
 
 A soft pebble with a few deliberate, functional gestures — minimal but not anonymous:
 
 - **Canted top** — the lid slopes up toward the OLED end so the screen tilts toward you on a
-  desk. PocketTap is a *glanceable* black-box recorder; the cant makes it readable without
+  desk. Hackagotchi is a *glanceable* black-box recorder; the cant makes it readable without
   picking it up. (It also gives the OLED end the extra height the 9 mm OLED module needs.)
 - **Probe snout** — a rounded cable-boot on the XIAO end where the USB-C and the UART-tap
   leads (GP0/GP1/GND) exit together. It reads as the "business end" of an instrument and
@@ -21,10 +21,10 @@ A soft pebble with a few deliberate, functional gestures — minimal but not ano
 ## Render to STL
 
 ```bash
-openscad -D 'part="base"'   -o case/pt_base.stl   case/pockettap_case.scad
-openscad -D 'part="top"'    -o case/pt_top.stl    case/pockettap_case.scad
-openscad -D 'part="coupon"' -o case/pt_coupon.stl case/pockettap_case.scad   # print FIRST: seam/fit test
-openscad -D 'part="all"'    -o case/pt_preview.stl case/pockettap_case.scad  # preview only — do NOT print
+openscad -D 'part="base"'   -o case/pt_base.stl   case/hackagotchi_case.scad
+openscad -D 'part="top"'    -o case/pt_top.stl    case/hackagotchi_case.scad
+openscad -D 'part="coupon"' -o case/pt_coupon.stl case/hackagotchi_case.scad   # print FIRST: seam/fit test
+openscad -D 'part="all"'    -o case/pt_preview.stl case/hackagotchi_case.scad  # preview only — do NOT print
 ```
 
 All three parts render manifold / `NoError`.
@@ -39,7 +39,7 @@ All three parts render manifold / `NoError`.
 ## ⚠️ Confirm with calipers before printing
 
 This is **v1 — the *form* is the deliverable, not the fit.** Every board outline and component
-position is marked `[MEASURE]` in the `.scad` because this machine has no PocketTap hardware to
+position is marked `[MEASURE]` in the `.scad` because this machine has no Hackagotchi hardware to
 measure. Before a full print, measure and set:
 
 - `brd_l/brd_w/brd_t`, `comp_h` (OLED module height), `under_h` (XIAO underside clearance)

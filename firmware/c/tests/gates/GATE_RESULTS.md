@@ -1,4 +1,4 @@
-# PocketDebugger — Gate Results
+# Hackagotchi — Gate Results
 
 Copy this file per attempt (e.g. `GATE_RESULTS_2026-06-20.md`) and fill it in. Evidence dirs
 (`gate0/ gate1/ gate2/`) are gitignored; attach key logs to the run record.

@@ -12,7 +12,7 @@ ver() {
   fi
 }
 
-echo "=== PocketDebugger toolchain snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+echo "=== Hackagotchi toolchain snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 echo "host:                  $(sw_vers -productName 2>/dev/null) $(sw_vers -productVersion 2>/dev/null) ($(uname -m))"
 ver probe-rs --version
 ver openocd --version

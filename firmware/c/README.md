@@ -1,9 +1,9 @@
-# PocketTap — C firmware ("PocketDebugger")
+# Hackagotchi — C firmware ("Hackagotchi")
 
 The next-generation C firmware: a fork of the Raspberry Pi
 [debugprobe](https://github.com/raspberrypi/debugprobe) that turns the device into a **real
 hardware SWD debug probe** (drivable by OpenOCD / probe-rs to halt, erase, and reflash a wedged
-target chip regardless of its firmware state) **while also** running the PocketTap OLED
+target chip regardless of its firmware state) **while also** running the Hackagotchi OLED
 dashboard, UART black-box recorder, and host command protocol — reimplemented in C on the
 Pico SDK + TinyUSB + FreeRTOS SMP.
 
@@ -43,8 +43,8 @@ below + a single low-priority OLED FreeRTOS task) to a fork of it.
 
 ## Board config
 
-[`boards/board_pockettap_config.h`](boards/board_pockettap_config.h) is the **draft** XIAO pin map
-for the fork. It documents the full current PocketTap pin usage and the SWD-vs-SD-bus collision.
+[`boards/board_hackagotchi_config.h`](boards/board_hackagotchi_config.h) is the **draft** XIAO pin map
+for the fork. It documents the full current Hackagotchi pin usage and the SWD-vs-SD-bus collision.
 ⚠️ **The SWCLK/SWDIO pins are a candidate pending the physical soldering decision** — a wrong pin
 fails Gate 1 silently as "no IDCODE." Lock them there, then validate with `probe-rs info` on the
 soldered header *before* trusting the Gate-1 soak.

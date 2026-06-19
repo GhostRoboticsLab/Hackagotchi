@@ -11,12 +11,12 @@ OUT="${1:-usb_snapshot_$(date +%Y%m%dT%H%M%S).txt}"
   echo
   echo "--- system_profiler SPUSBDataType (probe / CDC / serial) ---"
   system_profiler SPUSBDataType 2>/dev/null \
-    | grep -iA12 -E 'CMSIS|debugprobe|Picoprobe|PocketTap|Composite|CDC|Serial Number' \
+    | grep -iA12 -E 'CMSIS|debugprobe|Picoprobe|Hackagotchi|Composite|CDC|Serial Number' \
     || echo "(no match)"
   echo
   echo "--- ioreg IOUSB (probe / callout nodes) ---"
   ioreg -p IOUSB -l -w0 2>/dev/null \
-    | grep -iE 'CMSIS|debugprobe|PocketTap|IOCalloutDevice|USB Product Name|USB Vendor Name|bInterfaceNumber' \
+    | grep -iE 'CMSIS|debugprobe|Hackagotchi|IOCalloutDevice|USB Product Name|USB Vendor Name|bInterfaceNumber' \
     || echo "(no match)"
 } | tee "$OUT"
 echo "[snapshot] wrote $OUT"

@@ -1,9 +1,9 @@
-# PocketTap — Product & Dev Roadmap (research dossier)
+# Hackagotchi — Product & Dev Roadmap (research dossier)
 
-> **What this is.** PocketTap — the pocket UART debug bridge / black-box recorder in `pockettap/`
+> **What this is.** Hackagotchi — the pocket UART debug bridge / black-box recorder in `hackagotchi/`
 > (formerly "XIAO UART dev") — started as a refresh-immune telemetry tap for the PicoInky e-paper
 > dashboard. This dossier captures the research behind turning it into a standalone, sellable
-> instrument and a force-multiplier for our own dev loop. The product name is **PocketTap**; "XIAO
+> instrument and a force-multiplier for our own dev loop. The product name is **Hackagotchi**; "XIAO
 > RP2040" remains only as the hardware platform it runs on.
 >
 > **How it was produced.** A 5-lens multi-agent exploration (developer-experience, firmware
@@ -12,7 +12,7 @@
 > into the ranked roadmap below. Generated 2026-06-19.
 >
 > **Companion memory:** `xiao-multitool-product-roadmap.md`. **The tool itself:** see
-> `pockettap/README.md` and the `xiao-uart-debug-bridge` memory.
+> `hackagotchi/README.md` and the `xiao-uart-debug-bridge` memory.
 
 ---
 

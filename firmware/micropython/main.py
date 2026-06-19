@@ -524,13 +524,13 @@ def draw_progress_bar(oled, x, y, w, h, frac, c=1):
 
 
 def boot_splash():
-    # Animated power-on identity card: the PocketTap wordmark wipes in behind a bright scan
+    # Animated power-on identity card: the Hackagotchi wordmark wipes in behind a bright scan
     # bar, the underline grows with it, then the tagline + corner brackets settle in. One-shot
     # at boot (the only place a blocking animation is acceptable -- the loop isn't running yet).
     if not (oled_present and oled is not None):
         return
     try:
-        title = "PocketTap"
+        title = "Hackagotchi"
         tx0 = 28
         full_w = len(title) * 8
         steps = 16
@@ -1215,7 +1215,7 @@ def process_host_command(line):
         # Host status query (no state change): glanceable bridge state over USB, so a
         # companion app / script can monitor the recorder without reading the OLED.
         if data.get("q") == "status":
-            st = {"status": "OK", "fw": "PocketTap", "screen": screen, "demo": demo_mode,
+            st = {"status": "OK", "fw": "Hackagotchi", "screen": screen, "demo": demo_mode,
                   "baud": BAUDRATE, "tx": tx_bytes, "rx": rx_bytes,
                   "logging": logging_active, "log_file": current_log_filename,
                   "sd": sd_mounted, "tp_peak": tp_peak,
@@ -1261,7 +1261,7 @@ btn_pressed_time = 0
 btn_state = 1
 
 print("\r\n================================================")
-print(" PocketTap -- black-box recorder for dev boards")
+print(" Hackagotchi -- black-box recorder for dev boards")
 print(" that go dark (Seeed XIAO RP2040 + expansion)")
 print("Controls:")
 print("  - SHORT Press: Cycle values / Clear stats / Toggle views")

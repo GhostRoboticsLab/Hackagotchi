@@ -1,4 +1,4 @@
-# PocketDebugger — Engineering Plan
+# Hackagotchi — Engineering Plan
 
 **Status:** Execution plan. Companion to `docs/c-firmware-analysis.md` (the decision doc). The *whether* is settled — this is the *how*. Folds in three research reports: yapicoprobe verdict (A), reliability stack (B), gate test strategy (C).
 
@@ -8,9 +8,9 @@
 
 ## 1. Scope & principles
 
-**Goal.** Evolve the PocketTap device (Seeed XIAO RP2040 + expansion: SSD1306 128×64 OLED on I2C GP6/GP7; microSD on SPI0 GP2/3/4/CS28; PCF8563-class RTC @0x51; buzzer GP29; button GP27; LEDs GP25/26/17; target-UART tap on UART0 GP0/GP1) from its current MicroPython firmware into a **single C firmware** that is simultaneously:
+**Goal.** Evolve the Hackagotchi device (Seeed XIAO RP2040 + expansion: SSD1306 128×64 OLED on I2C GP6/GP7; microSD on SPI0 GP2/3/4/CS28; PCF8563-class RTC @0x51; buzzer GP29; button GP27; LEDs GP25/26/17; target-UART tap on UART0 GP0/GP1) from its current MicroPython firmware into a **single C firmware** that is simultaneously:
 - a **real SWD debug probe** (fork of `raspberrypi/debugprobe`, C + Pico SDK + TinyUSB + FreeRTOS SMP + PIO SWD), and
-- the full **PocketTap OLED dashboard + UART "black-box" recorder**, reimplemented in C.
+- the full **Hackagotchi OLED dashboard + UART "black-box" recorder**, reimplemented in C.
 
 **Principles (in priority order):**
 
@@ -19,7 +19,7 @@
 | 1 | **Reliability by construction** | The probe path must NEVER stall/corrupt. The architecture (task priorities, no blocking on the DAP path), not tooling, is the lever. Tooling only *enforces and regression-tests* it. |
 | 2 | **Gates-first** | No UI-porting code is written until **Gate 1** proves SWD ⇄ dashboard coexistence. Each gate is cheap to abandon; a failed gate kills/reshapes the plan before sunk cost. |
 | 3 | **Reuse over reinvent** | Established libs for SWD/USB/SD/OLED/JSON/tests. Hand-roll only the ~40-line SPSC ring and the few glue macros. |
-| 4 | **PicoInky stays a frozen test mule** | The MicroPython PicoInky repo/firmware is unchanged by this work — it is the *target* board against which the probe is validated, and a behavior reference for the ported screens. PocketDebugger is a **new C codebase** (this repo's `firmware/c/` subtree), not a mutation of the MicroPython tree. |
+| 4 | **PicoInky stays a frozen test mule** | The MicroPython PicoInky repo/firmware is unchanged by this work — it is the *target* board against which the probe is validated, and a behavior reference for the ported screens. Hackagotchi is a **new C codebase** (this repo's `firmware/c/` subtree), not a mutation of the MicroPython tree. |
 
 ---
 
@@ -142,11 +142,11 @@ Phased, gates-first. Estimate reconciled to the prior **~22–31 eng-day** total
 
 | Milestone | Tasks | Reliability-stack mapping | Est (eng-days) |
 |---|---|---|---|
-| **M0 — Gates** (no UI port) | Build/flash stock 2.2.3 (bare XIAO); **Gate 0** (probe halts/erases/flashes a spare Pico). Lock SWD pin map → `board_pockettap_config.h`. Fork + remap SWD + one core-0 OLED coexistence task; **Gate 1** soak (≥1000 cycles, +adversarial 50 ms variant); record heap watermark → heap_4/heap_1 decision. Add CDC1 + jsmn status handler; **Gate 2** (two nodes, DAP binds, JSON round-trip). | Pico SDK base; `daschr/pico-ssd1306`; `heap_4` instrumented; jsmn; SPSC ring; the gate harness scripts (§9). | **6–9** |
+| **M0 — Gates** (no UI port) | Build/flash stock 2.2.3 (bare XIAO); **Gate 0** (probe halts/erases/flashes a spare Pico). Lock SWD pin map → `board_hackagotchi_config.h`. Fork + remap SWD + one core-0 OLED coexistence task; **Gate 1** soak (≥1000 cycles, +adversarial 50 ms variant); record heap watermark → heap_4/heap_1 decision. Add CDC1 + jsmn status handler; **Gate 2** (two nodes, DAP binds, JSON round-trip). | Pico SDK base; `daschr/pico-ssd1306`; `heap_4` instrumented; jsmn; SPSC ring; the gate harness scripts (§9). | **6–9** |
 | **M1 — Probe + bridge + control core** | Productionize the fork on the locked pin map. Robust UART bridge (CDC0) with bounded SPSC ring; CDC1 JSON control (jsmn) — `status`, `next`/`prev`/`dump` equivalents. **Fault handler + crash box; SW-watchdog task; stack-overflow/malloc hooks.** Per-interface USB string descriptors for stable node mapping. | §4.1 concurrency, §4.2 error idiom, §4.3 fault box, §4.4 watchdog; jsmn; SPSC ring (host-tested). | **4–6** |
 | **M2 — SD + black-box logging** | `carlk3` FatFs on SPI0 (off-hot-path low-prio writer task). Port **session-based auto-incrementing log files** + UART telemetry recorder from MicroPython. RTC (PCF8563 @0x51) read for timestamps. | FatFs (low-prio task); log-rotation/session-index logic **host-unit-tested**; wedge detector state machine host-tested. | **3–5** |
 | **M3 — Core screens** | OLED dashboard task (RAM framebuffer; low-rate flush). Port the *highest-value* mono screens first: live UART/telemetry view, recorder status, probe status, clock. Button (GP27) + LEDs (GP25/26/17) + buzzer (GP29, non-blocking, off hot path). | `daschr/pico-ssd1306`; dashboard task at lowest prio pinned core 0; buzzer never on hot path. | **3–4** |
-| **M4 — Full UI parity** | Remaining PocketTap screens to parity with the MicroPython OLED family. Settings/config persisted to SD or flash. JSON control surface for host-side `dashboard_host.py`-style streaming if retained. | Reuse mono-page data conventions from PicoInky as a *behavior reference* (no code reuse — different language). cppcheck/clang-tidy curated set tightened. | **3–4** |
+| **M4 — Full UI parity** | Remaining Hackagotchi screens to parity with the MicroPython OLED family. Settings/config persisted to SD or flash. JSON control surface for host-side `dashboard_host.py`-style streaming if retained. | Reuse mono-page data conventions from PicoInky as a *behavior reference* (no code reuse — different language). cppcheck/clang-tidy curated set tightened. | **3–4** |
 | **M5 — Polish / release** | CI green on all gates (build + host tests + analyzers). Tagged GitHub Release with `.uf2`+`.elf`. Docs: pin map, license/NOTICE bundle, flashing guide. Optional HIL smoke test on the self-hosted runner. License hygiene pass (BSD-3/MIT/Apache NOTICEs shipped; SystemView confirmed absent from shipping image). | CI/CD §7; HIL smoke (nice-to-have); license posture (§2). | **3–4** |
 | | | **Total** | **22–32** |
 
@@ -156,7 +156,7 @@ Phased, gates-first. Estimate reconciled to the prior **~22–31 eng-day** total
 
 ## 6. The 3-gate plan
 
-**Locked SWD pin map (decide before any soldering).** Stock 2.2.3 defaults ✅ (`board_pico_config.h` @ v2.2.3): `SWCLK=GP2, SWDIO=GP3, RESET=GP1, UART_TX=GP4, UART_RX=GP5, uart1, LED=GP25, PROBE_SM=0`. **Collision:** GP2/3/4/28 are the PocketTap SD bus; GP4/5 aren't even broken out on the XIAO; the jancumps XIAO fork already moves the UART bridge to **GP0/GP1** ✅. **Recommended remap:** SWCLK/SWDIO onto two broken-out, uncommitted XIAO pins that avoid GP2/3/4/28 (SD), GP6/7 (OLED), and ideally GP0/1 (UART tap) — candidate **SWCLK=GP26, SWDIO=GP27** *if the button (GP27) is reclaimed*. ⚠️ **A wrong SWD pin fails Gate 1 silently as "no IDCODE."** Lock it in `board_pockettap_config.h` and record it in the gate doc; validate by Gate-0-style `probe-rs info` on the actual soldered header **before** trusting Gate 1.
+**Locked SWD pin map (decide before any soldering).** Stock 2.2.3 defaults ✅ (`board_pico_config.h` @ v2.2.3): `SWCLK=GP2, SWDIO=GP3, RESET=GP1, UART_TX=GP4, UART_RX=GP5, uart1, LED=GP25, PROBE_SM=0`. **Collision:** GP2/3/4/28 are the Hackagotchi SD bus; GP4/5 aren't even broken out on the XIAO; the jancumps XIAO fork already moves the UART bridge to **GP0/GP1** ✅. **Recommended remap:** SWCLK/SWDIO onto two broken-out, uncommitted XIAO pins that avoid GP2/3/4/28 (SD), GP6/7 (OLED), and ideally GP0/1 (UART tap) — candidate **SWCLK=GP26, SWDIO=GP27** *if the button (GP27) is reclaimed*. ⚠️ **A wrong SWD pin fails Gate 1 silently as "no IDCODE."** Lock it in `board_hackagotchi_config.h` and record it in the gate doc; validate by Gate-0-style `probe-rs info` on the actual soldered header **before** trusting Gate 1.
 
 ✅ `probe-rs` subcommands confirmed present: `list`, `info`, `erase`, `download` (`--verify`, `--chip` in flattened `ProbeOptions`/`BinaryDownloadOptions`), `verify`, `reset`, `read`, `write`, `benchmark`.
 
@@ -202,9 +202,9 @@ Use a known `blink.elf` from `pico-examples` so the blinking LED corroborates `v
 ### GATE 1 — fork + SWD-remapped + ONE low-prio OLED task survives a sustained flash loop
 **Make-or-break.** Prove that with SWD remapped off the SD bus AND a continuous core-0 OLED task, the probe flashes the target thousands of times with **zero** corruption/stall/timeout, and quantify heap headroom.
 
-**Built:** fork 2.2.3; add `board_pockettap_config.h` (remapped SWCLK/SWDIO, UART GP0/GP1, LED GP25); add **one** low-prio FreeRTOS task **pinned to core 0** that only drives the OLED (`daschr/pico-ssd1306` on GP6/GP7): increment a counter, render a few lines, `ssd1306_show()` in a loop with a small delay. DAP stays on core 1, untouched. This is a **coexistence harness, not the dashboard.** Build **`heap_4`** first.
+**Built:** fork 2.2.3; add `board_hackagotchi_config.h` (remapped SWCLK/SWDIO, UART GP0/GP1, LED GP25); add **one** low-prio FreeRTOS task **pinned to core 0** that only drives the OLED (`daschr/pico-ssd1306` on GP6/GP7): increment a counter, render a few lines, `ssd1306_show()` in a loop with a small delay. DAP stays on core 1, untouched. This is a **coexistence harness, not the dashboard.** Build **`heap_4`** first.
 
-**Setup:** Gate-0 wiring **plus the PocketTap expansion board attached** (real OLED live; SD/buzzer pins physically present to prove remapped SWD truly avoids them). SWD on the **remapped** pins. Optional: logic analyzer or the spare XIAO-UART bridge on GP0 telemetry for an independent stall trace.
+**Setup:** Gate-0 wiring **plus the Hackagotchi expansion board attached** (real OLED live; SD/buzzer pins physically present to prove remapped SWD truly avoids them). SWD on the **remapped** pins. Optional: logic analyzer or the spare XIAO-UART bridge on GP0 telemetry for an independent stall trace.
 
 **Procedure:** (1) flash fork; confirm `probe-rs info` reads the target on the **remapped** pins *before* stressing (proves the remap). (2) confirm OLED counter ticking + probe enumerated simultaneously. (3) run the soak ≥1000 cycles (~2–4 h). (4) periodically emit `xPortGetFreeHeapSize()` + `xPortGetMinimumEverFreeHeapSize()` over CDC. (5) tally + inspect min-ever-free watermark.
 
@@ -233,12 +233,12 @@ echo "DONE N=$N fails=$fails stalls=$stalls"|tee -a "$log"; exit $(( fails + sta
 
 **Pass/fail:** PASS = **1000 consecutive download+verify, 0 fails, 0 stalls** (`exit 0`), independent re-verify passes every cycle, OLED counter advanced throughout. Stretch: 5000 overnight. **Heap decision:** if min-ever-free stays comfortably positive (≳4 KB headroom, no monotonic decline) → keep `heap_4` (preferred; dashboard will malloc framebuffers/JSON). Retreat to `heap_1` only on fragmentation alloc failures (but `heap_1` forbids `vPortFree`, which the OLED lib / future tasks may need). FAIL = any corruption, stall, OLED freeze, downward-trending free heap (leak), or the adversarial variant failing.
 
-**Evidence:** soak log w/ per-cycle timings + tally; heap watermark series (plot via `heap_plot.py`); OLED-counter timelapse; fork SHA; `board_pockettap_config.h`; chosen heap scheme + measured headroom. **This log IS the gate verdict.**
+**Evidence:** soak log w/ per-cycle timings + tally; heap watermark series (plot via `heap_plot.py`); OLED-counter timelapse; fork SHA; `board_hackagotchi_config.h`; chosen heap scheme + measured headroom. **This log IS the gate verdict.**
 
 ### GATE 2 — add 2nd CDC: two usbmodem nodes, DAP still binds, JSON round-trip
 **Objective:** composite grows {DAP v2 + CDC0} → {DAP v2 + CDC0 + CDC1} cleanly: macOS enumerates **two** `/dev/cu.usbmodem*`, CMSIS-DAP still binds (probe-rs still works), `{"q":"status"}` round-trips on CDC1 while CDC0 carries the UART telemetry stream and DAP stays bound.
 
-**Built:** merge the `cdc_dual_ports` pattern into the fork's `usb_descriptors.c` — add a 2nd CDC (3rd+4th interface pair + 2 endpoints), keep device descriptor IAD composite `0xEF/0x02/0x01` ✅ with an IAD per CDC, bump `CFG_TUD_CDC=2` + `ITF_NUM_TOTAL`/`EPNUM_*`. Tiny CDC1 line handler parses `{"q":"status"}` (jsmn) → one-line JSON reply `{"fw":"…","heap":NNN,"up":SS}`. CDC0 keeps bridging the target UART. Set **distinct USB interface-name strings** per CDC (`"PocketTap UART"` / `"PocketTap Control"`).
+**Built:** merge the `cdc_dual_ports` pattern into the fork's `usb_descriptors.c` — add a 2nd CDC (3rd+4th interface pair + 2 endpoints), keep device descriptor IAD composite `0xEF/0x02/0x01` ✅ with an IAD per CDC, bump `CFG_TUD_CDC=2` + `ITF_NUM_TOTAL`/`EPNUM_*`. Tiny CDC1 line handler parses `{"q":"status"}` (jsmn) → one-line JSON reply `{"fw":"…","heap":NNN,"up":SS}`. CDC0 keeps bridging the target UART. Set **distinct USB interface-name strings** per CDC (`"Hackagotchi UART"` / `"Hackagotchi Control"`).
 
 **Setup:** Gate-1 (probe + target + OLED live) + a known UART stream into GP0/GP1 RX so CDC0 has real traffic.
 
@@ -271,7 +271,7 @@ wait
 
 ### Gate-results checklist template (copy into the gate doc)
 ```
-POCKETDEBUGGER GATE RESULTS
+HACKAGOTCHI GATE RESULTS
 Date: __  Operator: __  Host macOS: __  probe-rs: __  openocd: __  picotool: __
 Probe fw source/SHA: __  Pico SDK tag: __  Target: spare Pico (rev __)
 Locked SWD: SWCLK=GP__ SWDIO=GP__ RESET=GP__ UART=GP0/GP1 OLED I2C=GP6/GP7
@@ -327,7 +327,7 @@ Mirror the existing self-hosted-runner pattern (the MicroPython UF2 flow in Pico
 | R2 | **Heap fragmentation / exhaustion** under FreeRTOS on 264 KB RP2040 | High | `heap_4` instrumented; jsmn zero-alloc (no JSON DOM); watermark logged | **Gate 1** heap decision (data-driven heap_4 vs heap_1) |
 | R3 | **Dual-CDC node identity unstable on macOS** (numeric suffix not stable across reboot/replug) | High | Distinct per-interface USB string descriptors; map name→`IOCalloutDevice` via `ioreg`/`system_profiler` | **Gate 2** (3 replug + 1 reboot stability check) |
 | R4 | **SMP flash regression (#189)** ✅ — intermittent, flash-path-only, GDB/halt looks fine | High | Pin **2.2.3** (before commit `457e048`); soak with checksum-per-cycle, not happy-path | **Gate 1** soak (1000 cycles, 0 fails) |
-| R5 | **Wrong SWD pin remap** ⚠️ — fails silently as "no IDCODE" | High | Lock `board_pockettap_config.h`; validate via `probe-rs info` on the **soldered** header *before* soak | **Gate 1** pre-soak `info` check |
+| R5 | **Wrong SWD pin remap** ⚠️ — fails silently as "no IDCODE" | High | Lock `board_hackagotchi_config.h`; validate via `probe-rs info` on the **soldered** header *before* soak | **Gate 1** pre-soak `info` check |
 | R6 | **SWD pins physically don't reach / not broken out** on the XIAO expansion header (limited free GPIO; GP2/3/4/28=SD, 6/7=OLED, 0/1=UART) | Med | Lock pin map before soldering; candidate SWCLK=GP26/SWDIO=GP27 (reclaim button); verify broken-out on the expansion header | **Gate 0/1** wiring validation |
 | R7 | **yapicoprobe adopted prematurely** → bus-factor-1, unpinned breaking edge (#197 build break live), no umbrella license | Med | Stay on debugprobe 2.2.3; yapicoprobe = Gate-0 A/B reference + design template only; strict §2 trigger to revisit | §2 trigger gating |
 | R8 | **License hygiene for a sold product** — SystemView non-commercial; yapicoprobe no umbrella license | Med | Keep SystemView a bring-up tool, OUT of shipping image; if any yapicoprobe code is later vendored, confirm umbrella license + ship NOTICEs; residual stack is BSD-3/MIT/Apache | M5 license pass |
