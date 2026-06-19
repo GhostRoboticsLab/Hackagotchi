@@ -59,13 +59,19 @@ The pitch: a target board's own debug channel (USB-CDC, the REPL) goes dark exac
     * **Autonomous start**: set `{"cfg":{"log_on_boot":true}}` and the board records from power-on — an untethered/overnight capture with nobody to press START.
     * **Timestamps**: headers/heartbeats use real wall-clock time when the expansion board's **PCF8563 RTC (I2C 0x51)** has a good **CR1220** coin cell; with no/dead cell it falls back to uptime (`+Ns`). The target's own `dbg.log` markers already carry relative-ms times, so the session header is the absolute anchor.
     * ⚠️ The SD shares pins with the **PWM Lab** (D2/GP28, D8/GP2) — don't run that screen while logging. The UART tap (GP0/GP1) is unaffected, so logging + bridging coexist fine.
+11. **Watchdog — Flight Recorder (Screen 10)**: *the black-box differentiator.* Three always-on background monitors (they run no matter which screen you're viewing) surfaced on one status page:
+    * **Wedge detector**: once the target has been seen alive, going silent for **>8 s** is flagged as a *wedge* — the screen shows `WEDGE @ <time>`, a blinking `!` badge appears on every screen, the buzzer drops a low alarm, and the moment is stamped into the black-box log.
+    * **Freeze-frame**: the target's **last ~96 bytes** before it went dark are kept and shown — its dying words. Captured into the log alongside the wedge stamp.
+    * **Trigger watch**: each completed RX line is scanned for armed substrings (default `ERROR`, `FATAL`, `Traceback`, `panic`, `BUSY-TIMEOUT`). A match chirps, flashes, marks the log (`--- ALERT … ---`), and increments the on-screen hit counter. Set terms with `{"cfg":{"watch":["ERROR","oops"]}}` (≤ 8 terms).
+    * **Short press** = acknowledge (clears the hit count + the wedge flag).
+12. **Throughput Meter (Screen 11)**: a live **bytes/sec** sparkline (auto-scaled, 60 s window) with `now` / `peak` rates and a running `total`. **Short press** resets the meter.
 
 ---
 
 ## 🕹️ System Controls
 
-*   **SHORT PRESS (< 400ms)**: Cycles options, clears stats, toggles views, or enters logic probes.
-*   **LONG PRESS (>= 500ms)**: Cycles to the **next tool** (Screen 0 $\rightarrow$ 1 $\rightarrow$ 2 $\rightarrow$ 3 $\rightarrow$ 4 $\rightarrow$ 5 $\rightarrow$ 6 $\rightarrow$ 7 $\rightarrow$ 8 $\rightarrow$ 9 $\rightarrow$ 0).
+*   **SHORT PRESS (< 400ms)**: Cycles options, clears stats, toggles views, enters logic probes, or acknowledges alerts.
+*   **LONG PRESS (>= 500ms)**: Cycles to the **next tool** through all 12 screens (0 → 1 → … → 11 → 0), each with a distinct animated transition.
 *   **Buzzer Feedback**: 
     *   *Click*: Plays on button press.
     *   *Rising pitch slide*: Plays when switching screens.
@@ -128,8 +134,20 @@ You can configure the bridge on-the-fly from your host machine over USB. If you 
     echo '{"cfg": {"log_on_boot": true}}'  > /dev/cu.usbmodem21201
     echo '{"cfg": {"log_on_boot": false}}' > /dev/cu.usbmodem21201
     ```
+6.  **Trigger watch — beep/flag when the target says something**:
+    ```bash
+    # Up to 8 substrings; each completed RX line is scanned for them.
+    echo '{"cfg": {"watch": ["ERROR", "FATAL", "Guru Meditation"]}}' > /dev/cu.usbmodem21201
+    echo '{"cfg": {"watch": []}}' > /dev/cu.usbmodem21201   # disable
+    ```
+7.  **Hardware watchdog — auto-reboot on a true CPU hang (untethered)**:
+    ```bash
+    # Armed at the NEXT boot (kept off by default so it can't trip a slow reflash).
+    echo '{"cfg": {"wdt": true}}'  > /dev/cu.usbmodem21201
+    echo '{"cfg": {"wdt": false}}' > /dev/cu.usbmodem21201
+    ```
 The board will chime and return a JSON status line confirming the updated config
-(it includes `logging`, `log_on_boot`, and the active `log_file`).
+(it includes `logging`, `log_on_boot`, `log_file`, `watch`, and `wdt`).
 
 ---
 
