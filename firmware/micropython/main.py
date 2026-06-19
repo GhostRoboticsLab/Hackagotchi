@@ -296,6 +296,7 @@ log_buffer = bytearray()
 last_log_write_t = 0
 last_bb_hb = 0              # black-box heartbeat timer (stamps the log every 60s)
 current_log_filename = "uart_log.txt"
+last_log_err = ""          # last logger fault reason (SD FULL / WRITE ERR), shown on-screen
 
 def get_next_log_filename():
     global current_log_filename
@@ -334,7 +335,7 @@ def log_uart_data(data):
         flush_log_buffer()
 
 def flush_log_buffer():
-    global log_buffer, last_log_write_t, logging_active, current_log_filename
+    global log_buffer, last_log_write_t, logging_active, current_log_filename, last_log_err
     if len(log_buffer) == 0 or not sd_mounted:
         return
     try:
@@ -345,10 +346,17 @@ def flush_log_buffer():
         log_buffer = bytearray()
         last_log_write_t = time.ticks_ms()
     except Exception as e:
-        print("Logger write failed, stopping logger:", e)
+        # A write fault stops the recorder, but it must be VISIBLE -- a silent stop on a
+        # black box is the worst failure. Distinguish a full card (ENOSPC/errno 28) from a
+        # generic write error so the on-screen badge tells the user which to fix.
+        es = str(e)
+        last_log_err = "SD FULL" if ("28" in es or "ENOSPC" in es or "No space" in es) else "WRITE ERR"
+        print("Logger write failed (%s), stopping logger:" % last_log_err, e)
         logging_active = False
         log_buffer = bytearray()
-        beep(1000, 200)
+        beep(400, 120)
+        time.sleep_ms(60)
+        beep(400, 120)      # distinctive low double-buzz = recorder died
 
 
 # ----------------- RTC (PCF8563, expansion-board I2C @ 0x51) -----------------
@@ -386,9 +394,10 @@ def start_logging():
     # Open a fresh session file + write a timestamped header. Returns False if the SD
     # won't mount (caller can buzz an error). The single entry point for every start --
     # boot auto-start, the Screen-9 menu, and the host {"cfg":{"logging":true}} path.
-    global logging_active, log_buffer
+    global logging_active, log_buffer, last_log_err
     if not mount_sd():
         return False
+    last_log_err = ""       # fresh session clears any prior fault badge
     get_next_log_filename()
     log_buffer.extend(("\n=== BLACK BOX %s | start %s | baud %d ===\n"
                        % (current_log_filename, log_stamp(), BAUDRATE)).encode())
@@ -956,6 +965,13 @@ def process_host_command(line):
                 bridge_cfg["log_on_boot"] = bool(cfg["log_on_boot"])
                 changed = True
 
+            # 4c. Hardware watchdog. Armed once at boot and cannot be disarmed, so this
+            # only takes effect after the NEXT reboot -- intentional, to keep reflashing
+            # safe (a WDT armed now could trip mid-cp at the REPL and corrupt main.py).
+            if "wdt" in cfg:
+                bridge_cfg["wdt"] = bool(cfg["wdt"])
+                changed = True
+
             # 5. Toggle UART Logging
             if "logging" in cfg:
                 if bool(cfg["logging"]):
@@ -972,7 +988,7 @@ def process_host_command(line):
                 beep(3000, 40)
                 
                 # Print response back to host
-                res = {"status": "OK", "baud": BAUDRATE, "macros": bridge_cfg["macros"], "demo": demo_mode, "demo_on_boot": bridge_cfg.get("demo_on_boot", False), "logging": logging_active, "log_on_boot": bridge_cfg.get("log_on_boot", False), "log_file": current_log_filename}
+                res = {"status": "OK", "baud": BAUDRATE, "macros": bridge_cfg["macros"], "demo": demo_mode, "demo_on_boot": bridge_cfg.get("demo_on_boot", False), "logging": logging_active, "log_on_boot": bridge_cfg.get("log_on_boot", False), "log_file": current_log_filename, "wdt": bridge_cfg.get("wdt", False)}
                 print("\r\n" + json.dumps(res) + "\r\n")
                 
                 # Reset local visual selectors
@@ -1003,10 +1019,32 @@ print("  - SHORT Press: Cycle values / Clear stats / Toggle views")
 print("  - LONG Press  (>0.5s): Cycle to next tool/app")
 print("================================================")
 
-try:
-    while True:
+# --- Watchdog + fault-recovery state -------------------------------------------------
+# The loop body runs under a PER-ITERATION try/except so a transient fault (a bad byte,
+# an SD hiccup, an I2C glitch) never bricks the bridge -- it logs the fault, flashes the
+# error LED, beeps, and carries on watching the target. Only a STORM of faults (a
+# deterministic crash repeating every pass) escalates to a clean reboot. An OPTIONAL
+# hardware WDT (fed once per pass) recovers from a true CPU hang (e.g. a blocked USB-CDC
+# write). It is OFF by default: once armed it can't be disarmed, so a slow mpremote
+# reflash paused at the REPL could trip it mid-write and corrupt main.py. Enable it for
+# untethered black-box deployments (where you're not reflashing) with {"cfg":{"wdt":true}}.
+wdt = None
+if bridge_cfg.get("wdt", False):
+    try:
+        from machine import WDT
+        wdt = WDT(timeout=8388)     # RP2040 hardware max (~8.4s)
+    except Exception:
+        wdt = None
+loop_err_count = 0
+last_err_t = time.ticks_ms()
+last_loop_err = ""
+
+while True:
+    try:
         now_ms = time.ticks_ms()
-        
+        if wdt is not None:
+            wdt.feed()
+
         # ----------------- Button Polling -----------------
         v = button.value()
         if v != btn_state:
@@ -1368,8 +1406,14 @@ try:
                 oled.text(f"TX:{fmt_bytes(tx_bytes)}B", 4, 22)
                 oled.text(f"RX:{fmt_bytes(rx_bytes)}B", 4, 32)
                 oled.text(f"Up:{up_str}", 4, 42)
-                oled.text("USB<->UART", 4, 52)
+                if not last_log_err:
+                    oled.text("USB<->UART", 4, 52)
                 draw_cat(oled, is_active, anim_tick, last_type)
+                # A logger fault (full/unwritable card) gets a blinking full-width banner
+                # drawn last, so it stays legible even over the mascot frame.
+                if last_log_err and (anim_tick // 4) % 2 == 0:
+                    oled.fill_rect(0, 52, 128, 10, 0)
+                    text_small(oled, "LOG STOP: " + last_log_err, 2, 53)
                 oled.show()
                 
             elif screen == 1:
@@ -1710,20 +1754,46 @@ try:
                         oled.hline(0, 63, bar_w, 1)
                 oled.show()
 
-except Exception as err:
-    set_leds(True, False, False)
-    print("Bridge crashed:", err)
-    if oled_present:
+    except Exception as err:
+        # Per-iteration recovery -- the bridge stays alive through transient faults.
+        set_leds(True, False, False)
         try:
-            oled.fill(0)
-            oled.rect(0, 0, 128, 64, 1)
-            oled.text("BRIDGE ERROR!", 6, 6)
-            err_str = str(err)
-            oled.text(err_str[:15], 6, 22)
-            oled.text(err_str[15:30], 6, 36)
-            oled.text("Reconnecting...", 6, 50)
-            oled.show()
+            es = str(err)
         except Exception:
-            pass
-    while True:
-        time.sleep_ms(1000)
+            es = "?"
+        last_loop_err = es[:40]
+        print("loop fault:", es)
+        nowf = time.ticks_ms()
+        if time.ticks_diff(nowf, last_err_t) > 5000:
+            loop_err_count = 0          # faults far apart -> not a storm; reset the counter
+        loop_err_count += 1
+        last_err_t = nowf
+        # Stamp the fault into the black box (if recording) so a post-mortem sees it.
+        if logging_active:
+            try:
+                log_uart_data("\n--- FAULT %s %s ---\n" % (log_stamp(), es))
+                flush_log_buffer()
+            except Exception:
+                pass
+        beep(700, 50)
+        # A storm of back-to-back faults is a deterministic crash; a clean reboot (with a
+        # visible countdown, so it never looks bricked) beats spinning on the same error.
+        if loop_err_count >= 8:
+            print("fault storm -> rebooting")
+            for n in range(3, 0, -1):
+                if oled_present:
+                    try:
+                        oled.fill(0)
+                        oled.rect(0, 0, 128, 64, 1)
+                        oled.text("BRIDGE FAULT", 18, 8)
+                        oled.text(es[:18], 4, 26)
+                        oled.text("Rebooting %d.." % n, 18, 46)
+                        oled.show()
+                    except Exception:
+                        pass
+                beep(500, 60)
+                time.sleep_ms(700)
+            reset()
+        # Recoverable: a brief red flash, then carry on watching the target.
+        time.sleep_ms(120)
+        set_leds(False, False, True)
