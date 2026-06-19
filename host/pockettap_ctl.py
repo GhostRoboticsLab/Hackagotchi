@@ -191,9 +191,15 @@ def _capture_shot(s, wait=9.0):
     if not m:
         sys.exit("eink-shot: bad header %r" % header)
     w, h, n = int(m.group(1)), int(m.group(2)), int(m.group(3))
-    raw = base64.b64decode("".join(data))
+    b64 = "".join(data)
+    b64 = b64[:len(b64) - (len(b64) % 4)]          # drop any trailing partial group (dropped chunk)
+    try:
+        raw = base64.b64decode(b64)
+    except Exception as e:
+        sys.exit("eink-shot: base64 decode failed (%s) -- stream was corrupted, retry" % e)
     if len(raw) != n:
-        print("# warn: decoded %d bytes, header said %d" % (len(raw), n))
+        print("# warn: decoded %d of %d bytes (%d%% -- some chunks dropped; missing area shows gray)"
+              % (len(raw), n, 100 * len(raw) // n if n else 0))
     return w, h, raw
 
 

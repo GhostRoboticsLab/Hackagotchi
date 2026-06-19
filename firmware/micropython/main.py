@@ -299,7 +299,7 @@ if BAUDRATE not in BAUDRATES:
     BAUDRATE = 115200
 
 # Initialize hardware UART0. GPIO 0 = D6 (TX), GPIO 1 = D7 (RX).
-uart = UART(0, baudrate=BAUDRATE, tx=Pin(0), rx=Pin(1), rxbuf=1024, txbuf=1024)
+uart = UART(0, baudrate=BAUDRATE, tx=Pin(0), rx=Pin(1), rxbuf=8192, txbuf=1024)
 
 # Register polling handles
 poll = select.poll()
@@ -1124,7 +1124,7 @@ def process_host_command(line):
             # 1. Update Baudrate
             if "baud" in cfg and cfg["baud"] in BAUDRATES:
                 BAUDRATE = cfg["baud"]
-                uart.init(baudrate=BAUDRATE, tx=Pin(0), rx=Pin(1), rxbuf=1024, txbuf=1024)
+                uart.init(baudrate=BAUDRATE, tx=Pin(0), rx=Pin(1), rxbuf=8192, txbuf=1024)
                 bridge_cfg["baud"] = BAUDRATE
                 changed = True
                 
@@ -1411,7 +1411,7 @@ while True:
             else:
                 new_baud = int(menu_items[menu_idx])
                 BAUDRATE = new_baud
-                uart.init(baudrate=BAUDRATE, tx=Pin(0), rx=Pin(1), rxbuf=1024, txbuf=1024)
+                uart.init(baudrate=BAUDRATE, tx=Pin(0), rx=Pin(1), rxbuf=8192, txbuf=1024)
                 
                 # Save config
                 bridge_cfg["baud"] = BAUDRATE
