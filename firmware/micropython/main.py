@@ -1544,6 +1544,12 @@ while True:
                 if uart.any():
                     data = uart.read(uart.any())
                     if data:
+                        # NOTE: blocking write, by design. Do NOT try to make it non-blocking by
+                        # registering sys.stdout for POLLOUT in a poll() — on this MicroPython
+                        # stdin/stdout are the same USB-CDC stream, so registering stdout kills
+                        # stdin's POLLIN and silently breaks the reverse recovery channel
+                        # (n/r/g/R/B). Tested + reverted 2026-06-19. During recovery the host is
+                        # actively draining USB, so this never blocks in practice.
                         sys.stdout.buffer.write(data)
                         rx_bytes += len(data)
                         log_uart_data(data)
