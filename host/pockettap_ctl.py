@@ -148,6 +148,83 @@ def _print_freeze(fr):
         print("  %04x  %-47s  %s" % (i, " ".join(row), asc[i:i + 16]))
 
 
+def _capture_shot(s, wait=9.0):
+    """Send 'S' (a Pico reverse-channel command, char-forwarded through the bridge) and
+    collect the framebuffer dump: a `SS> w=.. h=.. n=..` header, raw `SSD <b64>` data lines,
+    and a `SS<` terminator. Returns (w, h, raw_bytes)."""
+    import re
+    import base64
+    try:
+        s.reset_input_buffer()
+    except Exception:
+        pass
+    s.write(b"S")          # raw char -> not JSON, so the bridge forwards it to the Pico
+    s.flush()
+    t = time.time()
+    buf = b""
+    header = None
+    data = []
+    done = False
+    while time.time() - t < wait and not done:
+        d = s.read(1024)
+        if not d:
+            time.sleep(0.02)
+            continue
+        buf += d
+        while b"\n" in buf:
+            ln, buf = buf.split(b"\n", 1)
+            txt = ln.strip().strip(b"\r").decode("utf-8", "replace")
+            if "SS> " in txt:
+                header = txt[txt.index("SS> "):]
+                data = []                      # (re)start on a fresh header
+            elif txt.startswith("SSD "):
+                data.append(txt[4:])
+            elif "SS<" in txt and header is not None:
+                done = True
+                break
+            elif "SS!" in txt:
+                sys.exit("eink-shot: device reported %r (is this an e-ink board?)" % txt)
+    if not (header and done):
+        sys.exit("eink-shot: no complete framebuffer (header=%s, %d data lines) -- retry"
+                 % (bool(header), len(data)))
+    m = re.search(r"w=(\d+) h=(\d+) n=(\d+)", header)
+    if not m:
+        sys.exit("eink-shot: bad header %r" % header)
+    w, h, n = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    raw = base64.b64decode("".join(data))
+    if len(raw) != n:
+        print("# warn: decoded %d bytes, header said %d" % (len(raw), n))
+    return w, h, raw
+
+
+def _render_shot(w, h, raw, out, scale):
+    """MONO_VLSB framebuffer -> grayscale PNG (ink bit=1 -> black). Falls back to a PGM
+    (dependency-free) if Pillow is missing."""
+    px = bytearray(w * h)
+    for y in range(h):
+        base = (y >> 3) * w
+        sh = y & 7
+        row = y * w
+        for x in range(w):
+            if base + x < len(raw):
+                px[row + x] = 0 if ((raw[base + x] >> sh) & 1) else 255
+            else:
+                px[row + x] = 128                      # missing data -> gray
+    try:
+        from PIL import Image
+        img = Image.frombytes("L", (w, h), bytes(px))
+        if scale > 1:
+            img = img.resize((w * scale, h * scale), Image.NEAREST)
+        img.save(out)
+    except ImportError:
+        if not out.endswith(".pgm"):
+            out = out.rsplit(".", 1)[0] + ".pgm"
+        with open(out, "wb") as f:
+            f.write(("P5\n%d %d\n255\n" % (w, h)).encode())
+            f.write(bytes(px))
+    print("eink-shot: %dx%d -> %s" % (w, h, out))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Drive PocketTap over its USB host-control channel.")
     ap.add_argument("--port", help="bridge serial port (default: auto-detect)")
@@ -159,6 +236,9 @@ def main():
     sub.add_parser("clear", help="reset tx/rx/throughput/hits + freeze-frame")
     w = sub.add_parser("watch", help="live-tail the relayed telemetry (Ctrl-C to stop)")
     w.add_argument("--seconds", type=float, default=0, help="auto-stop after N seconds (0 = until Ctrl-C)")
+    sh = sub.add_parser("shot", help="screenshot the Pico's e-ink over the tap -> PNG")
+    sh.add_argument("--out", default="eink_shot.png", help="output image path (default eink_shot.png)")
+    sh.add_argument("--scale", type=int, default=2, help="integer upscale for visibility (default 2)")
     args = ap.parse_args()
 
     serial = _need_serial()
@@ -176,6 +256,9 @@ def main():
         elif args.cmd == "clear":
             r = _query(s, {"clear": True}, want="cleared")
             print("cleared" if r and r.get("cleared") else "failed: %s" % r)
+        elif args.cmd == "shot":
+            w_, h_, raw = _capture_shot(s)
+            _render_shot(w_, h_, raw, args.out, args.scale)
         elif args.cmd == "watch":
             print("# watching %s (Ctrl-C to stop)" % port)
             t0 = time.time()
