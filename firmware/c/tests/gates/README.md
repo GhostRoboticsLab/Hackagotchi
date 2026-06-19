@@ -1,4 +1,4 @@
-# PocketDebugger gate harness
+# Hackagotchi gate harness
 
 Host-side scripts to run the three go/no-go gates from `docs/engineering-plan.md` §6. They
 **de-risk the one uncertain thing** — SWD ⇄ dashboard concurrency — before any UI is ported.
@@ -23,8 +23,8 @@ Pico SDK + Arm GCC are set up — see `../../setup.sh`).
 
 ## Hardware
 
-- **Probe** = the PocketTap XIAO. Gate 0 uses a **bare** XIAO (stock GP2/GP3 SWD free); Gate 1+
-  use the soldered, remapped SWD header (`../../boards/board_pockettap_config.h`).
+- **Probe** = the Hackagotchi XIAO. Gate 0 uses a **bare** XIAO (stock GP2/GP3 SWD free); Gate 1+
+  use the soldered, remapped SWD header (`../../boards/board_hackagotchi_config.h`).
 - **Target** = a separate spare **Raspberry Pi Pico** (plain RP2040). Powered by its own USB.
 - **Wiring** = Probe SWCLK→Target SWCLK, SWDIO→SWDIO, **GND→GND** (mandatory). Optional RESET→RUN.
 

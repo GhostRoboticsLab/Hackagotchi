@@ -1,8 +1,8 @@
-# PocketTap 🛠️ — a black-box flight recorder for dev boards that go dark
+# Hackagotchi 🛠️ — a black-box flight recorder for dev boards that go dark
 
-**PocketTap** is custom MicroPython firmware that turns a **Seeed Studio XIAO RP2040** on its **base expansion board** into a pocket black-box recorder and debugging suite for *other* dev boards.
+**Hackagotchi** is custom MicroPython firmware that turns a **Seeed Studio XIAO RP2040** on its **base expansion board** into a pocket black-box recorder and debugging suite for *other* dev boards.
 
-The pitch: a target board's own debug channel (USB-CDC, the REPL) goes dark exactly when you need it most — during an e-paper refresh, a TLS handshake, or a crash. PocketTap is a *separate* MCU with its own USB, a hardware UART tap, an OLED, a battery-backed RTC, and a microSD recorder, so it keeps **watching and driving** the target while that board is wedged — logging autonomously to SD with a wall-clock timestamp, on a screen, with no host attached. It's a flight recorder, not a tethered dumb adapter.
+The pitch: a target board's own debug channel (USB-CDC, the REPL) goes dark exactly when you need it most — during an e-paper refresh, a TLS handshake, or a crash. Hackagotchi is a *separate* MCU with its own USB, a hardware UART tap, an OLED, a battery-backed RTC, and a microSD recorder, so it keeps **watching and driving** the target while that board is wedged — logging autonomously to SD with a wall-clock timestamp, on a screen, with no host attached. It's a flight recorder, not a tethered dumb adapter.
 
 > Built on a Seeed XIAO RP2040. The current firmware runs as a single `main.py`. Flash with
 > `mpremote connect <port> cp firmware/micropython/main.py :main.py` then `reset` (plus the
@@ -18,9 +18,9 @@ firmware/
     main.py        the whole app
     lib/           vendored drivers (ssd1306; sdcard to be vendored)
   c/             v2 (planned) — a fork of Raspberry Pi debugprobe that makes the device a
-                 real SWD debug probe AND the PocketTap dashboard, in C. See docs/.
+                 real SWD debug probe AND the Hackagotchi dashboard, in C. See docs/.
 host/
-  pockettap_ctl.py   Mac/host CLI: status / freeze / screenshot / clear / watch over USB
+  hackagotchi_ctl.py   Mac/host CLI: status / freeze / screenshot / clear / watch over USB
 case/              3D-printable "Field Recorder" enclosure (OpenSCAD + notes)
 docs/
   roadmap.md              product roadmap
@@ -29,7 +29,7 @@ docs/
 
 **Status:** the MicroPython firmware (v1) is working and is what's documented below. The big
 next step is the **C firmware** ([`firmware/c/`](firmware/c)) — folding a real hardware SWD
-probe into PocketTap so it can *recover* the wedged boards it watches, not just record them.
+probe into Hackagotchi so it can *recover* the wedged boards it watches, not just record them.
 
 > Extracted from the PicoInky monorepo to stand on its own as a product.
 
@@ -142,11 +142,11 @@ Host-command lines (`{...}`) are intercepted whole and are **not** forwarded to 
 A companion CLI wraps all of this (auto-detects the bridge port):
 
 ```bash
-.venv/bin/python tools/pockettap_ctl.py status        # state snapshot
-.venv/bin/python tools/pockettap_ctl.py freeze         # hexdump the target's last words
-.venv/bin/python tools/pockettap_ctl.py screen 3       # jump to a screen
-.venv/bin/python tools/pockettap_ctl.py clear          # reset stats
-.venv/bin/python tools/pockettap_ctl.py watch          # live-tail relayed telemetry
+.venv/bin/python tools/hackagotchi_ctl.py status        # state snapshot
+.venv/bin/python tools/hackagotchi_ctl.py freeze         # hexdump the target's last words
+.venv/bin/python tools/hackagotchi_ctl.py screen 3       # jump to a screen
+.venv/bin/python tools/hackagotchi_ctl.py clear          # reset stats
+.venv/bin/python tools/hackagotchi_ctl.py watch          # live-tail relayed telemetry
 ```
 
 #### Examples:

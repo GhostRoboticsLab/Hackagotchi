@@ -1,13 +1,13 @@
-// pockettap_case.scad — minimal pocket case for PocketTap (Seeed XIAO RP2040 + Expansion Board:
+// hackagotchi_case.scad — minimal pocket case for Hackagotchi (Seeed XIAO RP2040 + Expansion Board:
 // 128x64 OLED, microSD, PCF8563 RTC + CR1220, buzzer, user button). A "field recorder" form:
 // a soft pebble with a gently CANTED top so the OLED tilts toward you on a desk, a tapering
 // PROBE SNOUT where the UART-tap leads exit, and a LANYARD eyelet for pocket carry. Snap-fit
 // clamshell, no visible screws.
 //
-//   openscad -D 'part="base"'   -o case/pt_base.stl   case/pockettap_case.scad
-//   openscad -D 'part="top"'    -o case/pt_top.stl    case/pockettap_case.scad
-//   openscad -D 'part="coupon"' -o case/pt_coupon.stl case/pockettap_case.scad   // fit test
-//   openscad -D 'part="all"'    -o case/pt_preview.stl case/pockettap_case.scad  // preview only
+//   openscad -D 'part="base"'   -o case/pt_base.stl   case/hackagotchi_case.scad
+//   openscad -D 'part="top"'    -o case/pt_top.stl    case/hackagotchi_case.scad
+//   openscad -D 'part="coupon"' -o case/pt_coupon.stl case/hackagotchi_case.scad   // fit test
+//   openscad -D 'part="all"'    -o case/pt_preview.stl case/hackagotchi_case.scad  // preview only
 //
 // v1 (2026-06-19) — authored from datasheets; board outline + component positions are [MEASURE].
 // The FORM is the deliverable; confirm cutout positions with calipers and print the coupon first.

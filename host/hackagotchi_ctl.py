@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-# pockettap_ctl.py - host CLI for PocketTap's USB host-control commands.
+# hackagotchi_ctl.py - host CLI for Hackagotchi's USB host-control commands.
 #
-# PocketTap (the XIAO UART bridge / black-box recorder, dir pockettap/) accepts JSON
+# Hackagotchi (the XIAO UART bridge / black-box recorder, dir hackagotchi/) accepts JSON
 # command lines on its USB-CDC and replies with JSON. This is the companion driver for
 # those commands so you don't have to hand-echo JSON at the port. Run with the venv:
 #
-#   .venv/bin/python tools/pockettap_ctl.py status            # bridge state snapshot
-#   .venv/bin/python tools/pockettap_ctl.py freeze            # dump the recorder's freeze-frame
-#   .venv/bin/python tools/pockettap_ctl.py screen 3          # jump the bridge to a screen (0..11)
-#   .venv/bin/python tools/pockettap_ctl.py clear             # reset tx/rx/throughput/hits stats
-#   .venv/bin/python tools/pockettap_ctl.py watch             # live-tail the relayed telemetry
-#   .venv/bin/python tools/pockettap_ctl.py --port /dev/cu.usbmodemXXXX status
+#   .venv/bin/python tools/hackagotchi_ctl.py status            # bridge state snapshot
+#   .venv/bin/python tools/hackagotchi_ctl.py freeze            # dump the recorder's freeze-frame
+#   .venv/bin/python tools/hackagotchi_ctl.py screen 3          # jump the bridge to a screen (0..11)
+#   .venv/bin/python tools/hackagotchi_ctl.py clear             # reset tx/rx/throughput/hits stats
+#   .venv/bin/python tools/hackagotchi_ctl.py watch             # live-tail the relayed telemetry
+#   .venv/bin/python tools/hackagotchi_ctl.py --port /dev/cu.usbmodemXXXX status
 #
 # The bridge is auto-detected by probing each /dev/cu.usbmodem* with {"q":"status"} and
-# matching the "fw":"PocketTap" reply (the Pico's own port stays silent / isn't a bridge).
+# matching the "fw":"Hackagotchi" reply (the Pico's own port stays silent / isn't a bridge).
 # Pure host-side: stdlib + pyserial, no device risk.
 
 import sys
@@ -30,7 +30,7 @@ def _need_serial():
         import serial  # noqa: F401
         return serial
     except ImportError:
-        sys.exit("pockettap_ctl: needs pyserial (run with .venv/bin/python)")
+        sys.exit("hackagotchi_ctl: needs pyserial (run with .venv/bin/python)")
 
 
 def _ports():
@@ -77,7 +77,7 @@ def _open(serial, port):
 
 def _resolve(serial, args):
     """Find the bridge by probing all ports CONCURRENTLY with {"q":"status"} and matching
-    the fw:PocketTap reply. Concurrent (not one-at-a-time) so a slow/wedged sibling port
+    the fw:Hackagotchi reply. Concurrent (not one-at-a-time) so a slow/wedged sibling port
     (the Pico's own CDC) can't eat the time budget or make detection flaky."""
     if args.port:
         return args.port
@@ -89,7 +89,7 @@ def _resolve(serial, args):
         except Exception:
             pass
     if not handles:
-        sys.exit("pockettap_ctl: no /dev/cu.usbmodem* ports found")
+        sys.exit("hackagotchi_ctl: no /dev/cu.usbmodem* ports found")
     for s in handles.values():
         try:
             s.write(b'{"q":"status"}\n')
@@ -107,7 +107,7 @@ def _resolve(serial, args):
             if d:
                 bufs[p] += d
                 r = _last_json(bufs[p])
-                if r and r.get("fw") == "PocketTap":
+                if r and r.get("fw") == "Hackagotchi":
                     found = p
                     break
         time.sleep(0.03)
@@ -117,7 +117,7 @@ def _resolve(serial, args):
         except Exception:
             pass
     if not found:
-        sys.exit("pockettap_ctl: no PocketTap bridge found on /dev/cu.usbmodem* (try --port)")
+        sys.exit("hackagotchi_ctl: no Hackagotchi bridge found on /dev/cu.usbmodem* (try --port)")
     return found
 
 
@@ -125,7 +125,7 @@ def _print_status(st):
     if not st:
         print("(no reply)")
         return
-    print("PocketTap  screen=%s  baud=%s  demo=%s" % (st.get("screen"), st.get("baud"), st.get("demo")))
+    print("Hackagotchi  screen=%s  baud=%s  demo=%s" % (st.get("screen"), st.get("baud"), st.get("demo")))
     print("  bytes    tx=%-8s rx=%-8s  throughput peak=%s B/s" % (st.get("tx"), st.get("rx"), st.get("tp_peak")))
     print("  recorder logging=%s  file=%s  sd=%s" % (st.get("logging"), st.get("log_file"), st.get("sd")))
     wedge = st.get("wedge")
@@ -232,7 +232,7 @@ def _render_shot(w, h, raw, out, scale):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Drive PocketTap over its USB host-control channel.")
+    ap = argparse.ArgumentParser(description="Drive Hackagotchi over its USB host-control channel.")
     ap.add_argument("--port", help="bridge serial port (default: auto-detect)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status", help="print a bridge state snapshot")
