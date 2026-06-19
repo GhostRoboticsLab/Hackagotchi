@@ -238,16 +238,40 @@ def ensure_sd_pins():
 # Attempt to mount SD card at boot
 mount_sd()
 
+_fx_trans_n = 0
 def trigger_transition_wipe():
-    if oled_present and oled is not None:
-        try:
-            for x in (32, 64, 96, 128):
+    # Multi-style screen transition; cycles each call for variety. Runs only on a screen
+    # change, so the brief blocking (~6 OLED frames) never disrupts steady-state bridging.
+    global _fx_trans_n
+    if not (oled_present and oled is not None):
+        return
+    try:
+        _fx_trans_n = (_fx_trans_n + 1) % 3
+        if _fx_trans_n == 0:
+            # Curtain: black closes in from both edges to the centre, lit leading rules.
+            for x in range(0, 65, 11):
+                oled.fill_rect(0, 0, x, 64, 0)
+                oled.fill_rect(128 - x, 0, x, 64, 0)
+                oled.vline(min(x, 127), 0, 64, 1)
+                oled.vline(max(0, 127 - x), 0, 64, 1)
+                oled.show()
+        elif _fx_trans_n == 1:
+            # Venetian blinds: 8 horizontal bands wipe down together.
+            for h in range(2, 10, 2):
+                for by in range(0, 64, 8):
+                    oled.fill_rect(0, by, 128, min(h, 8), 0)
+                oled.show()
+        else:
+            # Vertical scan-wipe: black sweeps left->right behind a bright scan bar.
+            for x in range(0, 129, 22):
                 oled.fill_rect(0, 0, x, 64, 0)
                 if x < 128:
-                    oled.vline(x, 0, 64, 1)
+                    oled.fill_rect(min(x, 126), 0, 2, 64, 1)
                 oled.show()
-        except Exception:
-            pass
+        oled.fill(0)
+        oled.show()
+    except Exception:
+        pass
 
 # ----------------- Persistent Config -----------------
 def load_bridge_cfg():
@@ -439,18 +463,74 @@ def draw_header(oled, title, anim_tick=0, demo=False, show_rec=False):
     oled.hline(0, 9, 128, 1)
 
 
+def draw_sparkline(oled, data, x, y, w, h, c=1, baseline=False):
+    # Auto-scaled line graph of `data` into the box (x,y,w,h). Reusable by the throughput
+    # meter and any screen that wants a trend. Cheap: one line() per sample.
+    n = len(data)
+    if n == 0 or w < 2 or h < 2:
+        return
+    lo = min(data)
+    hi = max(data)
+    rng = (hi - lo) or 1
+    if baseline:
+        oled.hline(x, y + h - 1, w, c)
+    prev = None
+    for i in range(n):
+        px = x + (i * (w - 1)) // max(1, n - 1)
+        py = y + h - 1 - int((h - 1) * (data[i] - lo) / rng)
+        if prev is not None:
+            oled.line(prev[0], prev[1], px, py, c)
+        prev = (px, py)
+
+
+def draw_progress_bar(oled, x, y, w, h, frac, c=1):
+    # Outlined bar filled to `frac` (0..1). Used for confirm timers and meters.
+    if frac < 0:
+        frac = 0.0
+    elif frac > 1:
+        frac = 1.0
+    oled.rect(x, y, w, h, c)
+    fw = int((w - 2) * frac)
+    if fw > 0:
+        oled.fill_rect(x + 1, y + 1, fw, h - 2, c)
+
+
 def boot_splash():
-    # Branded power-on identity card (PocketTap wordmark + tagline). Shown once before the
-    # main render loop takes over. Kept static here; the animated reveal lives in the FX kit.
+    # Animated power-on identity card: the PocketTap wordmark wipes in behind a bright scan
+    # bar, the underline grows with it, then the tagline + corner brackets settle in. One-shot
+    # at boot (the only place a blocking animation is acceptable -- the loop isn't running yet).
     if not (oled_present and oled is not None):
         return
     try:
-        oled.fill(0)
-        oled.text("PocketTap", 28, 14)
-        oled.hline(22, 26, 84, 1)
-        text_small(oled, "black box for boards", 4, 38)
-        text_small(oled, "that go dark", 28, 48)
-        oled.show()
+        title = "PocketTap"
+        tx0 = 28
+        full_w = len(title) * 8
+        steps = 16
+        for i in range(steps + 1):
+            rv = i / steps
+            oled.fill(0)
+            oled.text(title, tx0, 14)
+            cut = tx0 + int(full_w * rv)
+            oled.fill_rect(cut, 10, 128 - cut, 18, 0)   # mask the not-yet-revealed tail
+            if rv < 1.0:
+                oled.fill_rect(min(cut, 126), 10, 2, 18, 1)  # bright leading scan bar
+            oled.hline(22, 28, int(84 * rv), 1)          # underline grows with the reveal
+            oled.show()
+            time.sleep_ms(16)
+        for i in range(4):
+            oled.fill_rect(0, 34, 128, 30, 0)
+            if i >= 1:
+                text_small(oled, "black box for boards", 4, 40)
+            if i >= 2:
+                text_small(oled, "that go dark", 28, 50)
+            if i >= 3:
+                oled.hline(0, 0, 8, 1);    oled.vline(0, 0, 8, 1)        # top-left
+                oled.hline(120, 0, 8, 1);  oled.vline(127, 0, 8, 1)      # top-right
+                oled.hline(0, 63, 8, 1);   oled.vline(0, 56, 8, 1)       # bottom-left
+                oled.hline(120, 63, 8, 1); oled.vline(127, 56, 8, 1)     # bottom-right
+            oled.show()
+            time.sleep_ms(140)
+        time.sleep_ms(300)
     except Exception:
         pass
 
@@ -1037,7 +1117,6 @@ print("  - LONG Press  (>0.5s): Cycle to next tool/app")
 print("================================================")
 
 boot_splash()
-time.sleep_ms(800)
 
 # --- Watchdog + fault-recovery state -------------------------------------------------
 # The loop body runs under a PER-ITERATION try/except so a transient fault (a bad byte,
