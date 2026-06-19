@@ -13,10 +13,15 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
   probe-rs `download --verify` + openocd `verify_image` (6596 B) both confirm. See
   `firmware/c/tests/gates/GATE_RESULTS.md`. **Finding F0-1:** `probe-rs erase` is pathologically slow
   on RP2040 (>150s, doesn't use bootrom block-erase) — gate + our recovery flows use openocd/bootrom.
-- [ ] **Gate 1:** build the fork (debugprobe v2.2.3) + remap SWD off the SD bus + one low-prio
-  core-0 OLED task; `gate1_soak.sh` + `gate1_soak_openocd.sh` (≥1000 cycles, 0 fails/stalls +
-  adversarial 50 ms variant); record heap watermark → **decide heap_4 vs heap_1**; **lock the SWD
-  pins** in `firmware/c/boards/board_hackagotchi_config.h`.
+- [x] **Gate 1 — build half** *(2026-06-19, commit 2158e3d)*: fork built on debugprobe-v2.2.3,
+  SWD remapped + **locked** to GP26/GP27 (adjacent), UART0 tap GP0/1, one lowest-prio OLED
+  coexistence task on a real SSD1306 (i2c1 GP6/7), **heap_4**. Builds clean (pinned GCC 13.3 +
+  pico-sdk 2.2.0); `picotool info` verifies the pin map. Findings F1-1 (v2.2.3 is single-core
+  FreeRTOS — no SMP affinity), F1-2 (board injected via boards/ shim, not a probe_config.h overlay).
+- [ ] **Gate 1 — soak half (hardware):** attach the expansion board (real OLED) + rewire SWD to
+  D0/D1; flash the fork; `probe-rs info` on the remapped pins FIRST; then `gate1_soak.sh` +
+  `gate1_soak_openocd.sh` (≥1000 cycles, 0 fails/stalls) + the `ADVERSARIAL_STALL_MS=50` variant;
+  record heap watermark → **decide heap_4 vs heap_1**.
 - [ ] **Gate 2:** add the 2nd CDC (`cdc_dual_ports`, IAD `0xEF/0x02/0x01`); `gate2_cdc.py`
   round-trip 100/100; node mapping stable across 3 replug + 1 reboot.
 
