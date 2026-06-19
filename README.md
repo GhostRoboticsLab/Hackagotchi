@@ -49,13 +49,19 @@ This directory contains the custom MicroPython bridge firmware designed to turn 
      - `BOOT & RUN`: Persistently configures the board to boot directly into Demo Mode, then soft-resets the board.
      - `< CANCEL`: Cancels and returns to Screen 0.
    * **Auto-Apply**: Leaving the cursor on an option for **2 seconds** executes the action.
+10. **SD Explorer & Black Box (Screen 9)**:
+    * Mounts a microSD (SPI0: CS **D2/GP28**, SCK **D8/GP2**, MOSI **D9/GP3**, MISO **D10/GP4**) and browses files; the **file viewer** shows 5 lines × 21 cols in the 5×7 font (short-press scrolls).
+    * **Black-box recorder**: `[START LOGGING]` opens an auto-incrementing session file (`log_NNN.txt`) and streams the raw UART telemetry to it, buffered (flush at 64 B / 500 ms). Each session writes a timestamped header and a **60 s heartbeat** marker — so if the target goes silent (a wedge) the last heartbeat bounds when it died. A write error stops the logger and buzzes.
+    * **Autonomous start**: set `{"cfg":{"log_on_boot":true}}` and the board records from power-on — an untethered/overnight capture with nobody to press START.
+    * **Timestamps**: headers/heartbeats use real wall-clock time when the expansion board's **PCF8563 RTC (I2C 0x51)** has a good **CR1220** coin cell; with no/dead cell it falls back to uptime (`+Ns`). The target's own `dbg.log` markers already carry relative-ms times, so the session header is the absolute anchor.
+    * ⚠️ The SD shares pins with the **PWM Lab** (D2/GP28, D8/GP2) — don't run that screen while logging. The UART tap (GP0/GP1) is unaffected, so logging + bridging coexist fine.
 
 ---
 
 ## 🕹️ System Controls
 
 *   **SHORT PRESS (< 400ms)**: Cycles options, clears stats, toggles views, or enters logic probes.
-*   **LONG PRESS (>= 500ms)**: Cycles to the **next tool** (Screen 0 $\rightarrow$ 1 $\rightarrow$ 2 $\rightarrow$ 3 $\rightarrow$ 4 $\rightarrow$ 5 $\rightarrow$ 6 $\rightarrow$ 7 $\rightarrow$ 8 $\rightarrow$ 0).
+*   **LONG PRESS (>= 500ms)**: Cycles to the **next tool** (Screen 0 $\rightarrow$ 1 $\rightarrow$ 2 $\rightarrow$ 3 $\rightarrow$ 4 $\rightarrow$ 5 $\rightarrow$ 6 $\rightarrow$ 7 $\rightarrow$ 8 $\rightarrow$ 9 $\rightarrow$ 0).
 *   **Buzzer Feedback**: 
     *   *Click*: Plays on button press.
     *   *Rising pitch slide*: Plays when switching screens.
@@ -108,7 +114,18 @@ You can configure the bridge on-the-fly from your host machine over USB. If you 
     # Disable Demo Mode on boot:
     echo '{"cfg": {"demo_on_boot": false}}' > /dev/cu.usbmodem21201
     ```
-The board will chime and return a JSON status line confirming the updated config.
+5.  **Black box — start/stop recording, and auto-start on boot**:
+    ```bash
+    # Start a new session log now (log_NNN.txt on the SD):
+    echo '{"cfg": {"logging": true}}'  > /dev/cu.usbmodem21201
+    echo '{"cfg": {"logging": false}}' > /dev/cu.usbmodem21201
+
+    # Record automatically from power-on (untethered black box):
+    echo '{"cfg": {"log_on_boot": true}}'  > /dev/cu.usbmodem21201
+    echo '{"cfg": {"log_on_boot": false}}' > /dev/cu.usbmodem21201
+    ```
+The board will chime and return a JSON status line confirming the updated config
+(it includes `logging`, `log_on_boot`, and the active `log_file`).
 
 ---
 
