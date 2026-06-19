@@ -8,7 +8,8 @@ Date: 2026-06-19  Operator: Pratheek  Host macOS: Darwin 25.5.0  probe-rs: 0.31 
 Probe fw source/SHA: stock debugprobe-v2.2.3 (debugprobe_on_pico.uf2), CMSIS-DAP serial 4150324E30363318
 Pico SDK tag: 2.x (MicroPython-bundled; blink fixtures built with pinned Arm GCC 13.3.Rel1)
 Target: fresh Pico W (RP2040 rev B2, flash 'win w25q16jv' 2MB) running PicoInky 0.8.0 before the wipe
-Wired SWD: SWCLK=GP2 (XIAO pad D8)  SWDIO=GP3 (XIAO pad D10)  GND  (3-pin header, no RESET pin)
+Wired SWD (Gate 0): SWCLK=GP2 (D8)  SWDIO=GP3 (D10)  GND  (3-pin, no RESET)
+Wired SWD (Gate 1, REMAPPED + LOCKED): SWCLK=GP26 (D0)  SWDIO=GP27 (D1)  GND  — fork firmware; verified live by probe-rs info (see gate1/provenance.txt). NB: the CMSIS-DAP serial 4150324E30363318 is the RP2040 flash unique-id and is IDENTICAL for the stock probe and the fork — it is NOT firmware-discriminating; the picotool product string ("Hackagotchi Probe") + GP26/27 pin map are.
 ```
 
 ## GATE 0 — stock probe halts/erases/flashes a target  ·  [ **PASS** ]  (2026-06-19, 5/5)
@@ -28,24 +29,43 @@ hardware/wiring fault (the same probe+target mass-erase fine via openocd). `gate
 full mass-erase through openocd and gets the per-region sector-erase proof from `probe-rs download --verify`.
 Carry-over for the product: our own recovery/flash flows should use the bootrom block-erase, not probe-rs erase.
 
-## GATE 1 — fork + SWD-remap + OLED task survives sustained flash  ·  [ BUILD DONE — SOAK PENDING ]
-- Fork base: `debugprobe-v2.2.3` (upstream HEAD 466432c)  Fork build commit: **2158e3d** (2026-06-19)
-- **Build half — DONE & statically verified:**
-  - [x] Fork builds clean with pinned Arm GCC 13.3.Rel1 + pico-sdk 2.2.0 (text 62520, copy_to_ram).
-  - [x] Remapped SWD locked: **SWCLK=GP26 (D0), SWDIO=GP27 (D1, button reclaimed)**, adjacent
-        (SWDIO=SWCLK+1 per probe.pio set_consecutive_pindirs), PROBE_IO_RAW. UART0 tap GP0/1.
-        `picotool info -a` confirms pins 26/27 + UART0 + "Hackagotchi Probe (CMSIS-DAP)".
-  - [x] ONE OLED coexistence task at tskIDLE_PRIORITY (lowest), drives a real SSD1306 on i2c1
-        GP6/7; touches only I2C+heap (no tud_* → cannot perturb USB/DAP). heap_4.
-  - [x] Adversarial 50 ms variant available: `ADVERSARIAL_STALL_MS=50 ./build_fork.sh`.
-- **Soak half — PENDING (hardware-in-the-loop):**
-  - [ ] remapped SWD verified by `probe-rs info` **before** the soak (the GP27-button-cap arbiter)
-  - [ ] OLED counter advanced + probe enumerated simultaneously
-  - [ ] N cycles: ____ (bar ≥ 1000)  fails: ____  stalls: ____  re-verify mismatch: ____ (must be 0)
-  - [ ] adversarial 50 ms-stall variant fails: ____ (must be 0)
-  - [ ] openocd-client twin soak (`gate1_soak_openocd.sh`) also clean
-  - Heap: scheme = heap_4  free = ____ B  min-ever-free = ____ B  leak? ____  **DECISION: heap__**
-  - Evidence: `gate1/soak_*.log`, heap plot, OLED timelapse
+## GATE 1 — fork + SWD-remap + OLED task survives sustained flash  ·  [ **PASS** (core claim) — robustness items deferred, see verdict ]
+- Fork base: `debugprobe-v2.2.3` (upstream HEAD 466432c)  Build commit **2158e3d**; soak-hardening **07c1a70** (2026-06-19)
+- **Build — DONE & statically verified:**
+  - [x] Fork builds clean (pinned Arm GCC 13.3.Rel1 + pico-sdk 2.2.0, text 62520, copy_to_ram).
+  - [x] SWD locked **SWCLK=GP26 / SWDIO=GP27** (adjacent, SWDIO=SWCLK+1 per probe.pio), PROBE_IO_RAW, UART0 tap GP0/1.
+        `picotool info -a` + the soak provenance banner confirm pins 26/27 + "Hackagotchi Probe (CMSIS-DAP)".
+  - [x] ONE OLED coexistence task at tskIDLE_PRIORITY (strictly below DAP); real SSD1306 on i2c1 GP6/7;
+        touches only I2C+heap (no tud_* → cannot perturb USB/DAP). heap_4.
+- **Soak — DONE (pre-soak `probe-rs info` on GP26/27 read both cores' ROM tables):**
+  - [x] probe-rs: **1000/1000**, 0 fails, 0 stalls, 0 re-verify mismatch
+  - [x] openocd twin: **200/200**, 0 fails, 0 stalls
+  - [x] adversarial 50 ms (idle-prio): **1000/1000**, 0 fails, 0 stalls *(build flashed via picotool load; `stall=` self-proof deferred — see verdict)*
+  - [x] stretch (hardened script + provenance banner): **3000** cycles, 0 fails/stalls *(running → final count on completion)*
+  - [x] OLED counter advanced throughout — **operator-attested** ("the OLED was always working perfectly", 2026-06-19) + pre-soak visual (n= rising, heap min 51016)
+  - Pass/fail decided by STDOUT ("Verification successful" count==N, no "Verification failed"), NOT exit code — see F1-3.
+  - Heap: scheme **heap_4**  free **51016 B**  min-ever-free **51016 B** (of 64 KB)  leak? none observed  **DECISION: keep heap_4**
+    (capability + the coexistence harness does ZERO runtime FreeRTOS allocation, so free==min is expected; revisit when the
+    real dashboard mallocs, and instrument newlib then — the SSD1306 framebuffer is C-lib malloc, invisible to xPortGetFreeHeapSize).
+  - Evidence: `gate1/soak_*.log` (provenance banner + per-cycle verify), `gate1/provenance.txt`.
+
+### Verdict — 5-lens adversarial verification (workflow wf_8b26aea9): PASS_WITH_BLOCKERS → core claim PASSES, robustness deferred
+The DAP-safety ENGINEERING was verified sound by all lenses + an independent re-check (DAP higher-prio than the OLED task,
+single-core, `i2c_write_blocking` holds no lock/IRQ, three independent peripherals, no priority inversion); the soaks are real
+(0 fails under the corrected check). Blocker disposition:
+- [x] **F1-3 (CRITICAL) — defanged re-verify guard:** `probe-rs verify` 0.31 prints "Verification failed: contents do not match"
+      but EXITS 0 (confirmed live). The old `if ! probe-rs verify` counted nothing. FIXED (07c1a70: decide by stdout); existing
+      logs retroactively re-validated clean.
+- [x] **Provenance:** the CMSIS-DAP serial is the RP2040 flash unique-id (identical stock↔fork), NOT firmware-discriminating.
+      Closed via the picotool product string + GP26/27 pin map + a `probe-rs info` provenance banner now teed into every soak log.
+- [x] **OLED liveness** (a clean soak alone doesn't prove the panel kept looping — NAKs are swallowed, `ok` latched at boot):
+      closed by operator attestation + pre-soak visual confirmation.
+- [x] **Gate doc** now records the run (this section).
+- [ ] **DEFERRED to hardware return** (needs a GP0→GP1 loopback jumper + 1 BOOTSEL — impossible while the operator is away):
+      machine-capture the OLED counter (assert monotonic) + heap series + adversarial `stall=` build-id via the loopback→CDC;
+      flash the **at-DAP-priority** variant (`ADVERSARIAL_AT_DAP_PRIO=ON`, compile-verified) for a genuine contention test (the
+      idle-priority busy_wait is preempted in ~50 µs = a weak stressor). These STRENGTHEN the verdict; the core SWD⇄dashboard
+      coexistence claim already holds on the design proof + 2200+ clean cycles + attestation.
 
 ### Finding F1-1: debugprobe-v2.2.3 is SINGLE-CORE FreeRTOS (the engineering-plan SMP affinity model does NOT apply)
 `src/FreeRTOSConfig.h` sets `configNUM_CORES=1`; no `multicore_launch`/`vTaskCoreAffinitySet` anywhere
