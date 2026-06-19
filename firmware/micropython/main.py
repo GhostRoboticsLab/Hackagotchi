@@ -1114,6 +1114,7 @@ usb_rx_buf = ""
 
 def process_host_command(line):
     global BAUDRATE, macro_items, bridge_cfg, demo_mode, last_demo_switch_t, screen, tx_bytes, rx_bytes, logging_active, watch_terms
+    global tp_peak, tp_accum, watch_hits      # rebound by {"clear":true}
     try:
         data = json.loads(line)
         if "cfg" in data:
@@ -1217,8 +1218,30 @@ def process_host_command(line):
             st = {"status": "OK", "fw": "PocketTap", "screen": screen, "demo": demo_mode,
                   "baud": BAUDRATE, "tx": tx_bytes, "rx": rx_bytes,
                   "logging": logging_active, "log_file": current_log_filename,
-                  "sd": sd_mounted, "tp_peak": tp_peak}
+                  "sd": sd_mounted, "tp_peak": tp_peak,
+                  "wedge": wedge_active, "hits": watch_hits}
             print("\r\n" + json.dumps(st) + "\r\n")
+            return True
+
+        # Retrieve the flight-recorder's freeze-frame: the target's last ~96 bytes (its "dying
+        # words"), as hex + printable ASCII, plus the wedge flag/stamp. Pull a wedge post-mortem
+        # over USB without reading the OLED or yanking the microSD.
+        if data.get("q") == "freeze":
+            fb = bytes(freeze_frame)
+            fr = {"status": "OK", "wedge": wedge_active, "since": wedge_since, "hits": watch_hits,
+                  "n": len(fb),
+                  "hex": " ".join("%02x" % b for b in fb),
+                  "ascii": "".join(chr(b) if 32 <= b <= 126 else "." for b in fb)}
+            print("\r\n" + json.dumps(fr) + "\r\n")
+            return True
+
+        # Host-side stat reset (mirrors the on-device short-press "clear"): zero the byte/
+        # throughput counters + trigger hits and drop the freeze-frame, for scripted captures.
+        if data.get("clear"):
+            tx_bytes = 0; rx_bytes = 0; tp_peak = 0; tp_accum = 0; watch_hits = 0
+            freeze_frame[:] = b""
+            beep(2400, 30)
+            print("\r\n" + json.dumps({"status": "OK", "cleared": True}) + "\r\n")
             return True
     except Exception as e:
         print(json.dumps({"status": "error", "msg": str(e)}))
@@ -1557,14 +1580,20 @@ while True:
                         usb_rx_buf += c
                         if len(usb_rx_buf) > 512:
                             usb_rx_buf = ""
-                            
-                        # Standard raw forwarding on character bounds (character mode)
-                        uart.write(char)
-                        tx_bytes += len(char)
-                        log_uart_data(char)
-                        last_activity_t = time.ticks_ms()
-                        last_type = "TX"
-                        set_leds(False, True, False)
+
+                        # Char-mode forward for interactive target use -- but NOT while
+                        # assembling a JSON host-command line (starts with '{'); those are
+                        # intercepted whole at '\n', and char-forwarding would leak their bytes
+                        # to the target (e.g. the 'r' in {"clear":true} would fire the Pico's
+                        # refetch). A genuine target-bound {..} line is still forwarded whole at
+                        # newline by the line-mode path below.
+                        if not (usb_rx_buf and usb_rx_buf[0] == "{"):
+                            uart.write(char)
+                            tx_bytes += len(char)
+                            log_uart_data(char)
+                            last_activity_t = time.ticks_ms()
+                            last_type = "TX"
+                            set_leds(False, True, False)
                         
             elif fd == uart and (event & select.POLLIN):
                 if uart.any():
