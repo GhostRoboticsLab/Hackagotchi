@@ -171,6 +171,31 @@ rx_bytes = 0
 logging_active = False
 log_buffer = bytearray()
 last_log_write_t = 0
+current_log_filename = "uart_log.txt"
+
+def get_next_log_filename():
+    global current_log_filename
+    if not sd_mounted:
+        current_log_filename = "uart_log.txt"
+        return current_log_filename
+    try:
+        import os
+        ensure_sd_pins()
+        files = os.listdir("/sd")
+        max_idx = 0
+        for f in files:
+            if f.startswith("log_") and f.endswith(".txt"):
+                try:
+                    idx = int(f[4:-4])
+                    if idx > max_idx:
+                        max_idx = idx
+                except ValueError:
+                    pass
+        new_idx = max_idx + 1
+        current_log_filename = f"log_{new_idx:03d}.txt"
+    except Exception:
+        current_log_filename = "uart_log.txt"
+    return current_log_filename
 
 def log_uart_data(data):
     global log_buffer, last_log_write_t, logging_active
@@ -185,13 +210,13 @@ def log_uart_data(data):
         flush_log_buffer()
 
 def flush_log_buffer():
-    global log_buffer, last_log_write_t, logging_active
+    global log_buffer, last_log_write_t, logging_active, current_log_filename
     if len(log_buffer) == 0 or not sd_mounted:
         return
     try:
         import os
         ensure_sd_pins()
-        with open("/sd/uart_log.txt", "ab") as f:
+        with open("/sd/" + current_log_filename, "ab") as f:
             f.write(log_buffer)
         log_buffer = bytearray()
         last_log_write_t = time.ticks_ms()
@@ -732,6 +757,7 @@ def process_host_command(line):
                 logging_active = bool(cfg["logging"])
                 if logging_active:
                     mount_sd()
+                    get_next_log_filename()
                 else:
                     flush_log_buffer()
                 changed = True
@@ -1003,6 +1029,7 @@ try:
                 beep(2000, 30)
             elif item_text == "[START LOGGING]":
                 logging_active = True
+                get_next_log_filename()
                 beep(2400, 30)
                 time.sleep_ms(50)
                 beep(2800, 30)
