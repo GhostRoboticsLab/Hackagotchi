@@ -58,6 +58,129 @@ try:
 except Exception as e:
     print("OLED configuration failed:", e)
 
+# ----------------- Compact 5x7 font (data-dense screens) -----------------
+# The built-in framebuf font is locked at 8x8 (16 cols x 8 rows, no scaling). To pack
+# more onto the text-heavy screens (sniffer/hex, SD viewer, probe sidebar) we ship the
+# canonical 5x7 "glcdfont": 5 column bytes per glyph, bit0 = top row .. bit6 = row 7.
+# At a 6px advance that's 21 cols across 128px. Titles/menus keep the legible 8x8 font.
+_F5x7 = bytes.fromhex(
+    "0000000000"  # 0x20 space
+    "00005f0000"  # !
+    "0007000700"  # "
+    "147f147f14"  # #
+    "242a7f2a12"  # $
+    "2313086462"  # %
+    "3649552250"  # &
+    "0005030000"  # '
+    "001c224100"  # (
+    "0041221c00"  # )
+    "14083e0814"  # *
+    "08083e0808"  # +
+    "0050300000"  # ,
+    "0808080808"  # -
+    "0060600000"  # .
+    "2010080402"  # /
+    "3e5149453e"  # 0
+    "00427f4000"  # 1
+    "4261514946"  # 2
+    "2141454b31"  # 3
+    "1814127f10"  # 4
+    "2745454539"  # 5
+    "3c4a494930"  # 6
+    "0171090503"  # 7
+    "3649494936"  # 8
+    "064949291e"  # 9
+    "0036360000"  # :
+    "0056360000"  # ;
+    "0008142241"  # <
+    "1414141414"  # =
+    "4122140800"  # >
+    "0201510906"  # ?
+    "324979413e"  # @
+    "7e1111117e"  # A
+    "7f49494936"  # B
+    "3e41414122"  # C
+    "7f4141221c"  # D
+    "7f49494941"  # E
+    "7f09090901"  # F
+    "3e4149497a"  # G
+    "7f0808087f"  # H
+    "00417f4100"  # I
+    "2040413f01"  # J
+    "7f08142241"  # K
+    "7f40404040"  # L
+    "7f020c027f"  # M
+    "7f0408107f"  # N
+    "3e4141413e"  # O
+    "7f09090906"  # P
+    "3e4151215e"  # Q
+    "7f09192946"  # R
+    "4649494931"  # S
+    "01017f0101"  # T
+    "3f4040403f"  # U
+    "1f2040201f"  # V
+    "3f4038403f"  # W
+    "6314081463"  # X
+    "0708700807"  # Y
+    "6151494543"  # Z
+    "007f414100"  # [
+    "0204081020"  # backslash
+    "0041417f00"  # ]
+    "0402010204"  # ^
+    "4040404040"  # _
+    "0001020400"  # `
+    "2054545478"  # a
+    "7f48444438"  # b
+    "3844444420"  # c
+    "384444487f"  # d
+    "3854545418"  # e
+    "087e090102"  # f
+    "0c5252523e"  # g
+    "7f08040478"  # h
+    "00447d4000"  # i
+    "2040443d00"  # j
+    "7f10284400"  # k
+    "00417f4000"  # l
+    "7c04180478"  # m
+    "7c08040478"  # n
+    "3844444438"  # o
+    "7c14141408"  # p
+    "081414187c"  # q
+    "7c08040408"  # r
+    "4854545420"  # s
+    "043f444020"  # t
+    "3c4040207c"  # u
+    "1c2040201c"  # v
+    "3c4030403c"  # w
+    "4428102844"  # x
+    "0c5050503c"  # y
+    "4464544c44"  # z
+    "0008364100"  # {
+    "00007f0000"  # |
+    "0041360800"  # }
+    "0804081008"  # ~
+)
+
+
+def text_small(oled, s, x, y, c=1):
+    # Render a string in the 5x7 font (6px advance). Clips at the right edge so a long
+    # line never wraps into the next row. Falls back to blank for chars outside 0x20-0x7E.
+    for ch in s:
+        o = (ord(ch) - 0x20) * 5
+        if 0 <= o <= len(_F5x7) - 5 and x + 5 <= 128:
+            for col in range(5):
+                bits = _F5x7[o + col]
+                px = x + col
+                yy = y
+                while bits:
+                    if bits & 1:
+                        oled.pixel(px, yy, c)
+                    bits >>= 1
+                    yy += 1
+        x += 6
+        if x >= 128:
+            break
+
 # ----------------- SD Card Setup -----------------
 sd_present = False
 sd_mounted = False
@@ -228,17 +351,31 @@ def flush_log_buffer():
 
 def draw_rec_indicator(oled, anim_tick):
     if logging_active and (anim_tick // 4) % 2 == 0:
-        oled.fill_rect(92, 4, 4, 4, 1)
-        oled.text("REC", 98, 2)
+        oled.fill_rect(92, 2, 4, 4, 1)
+        oled.text("REC", 98, 0)
+
+
+def draw_header(oled, title, anim_tick=0, demo=False, show_rec=False):
+    # Slim title bar shared by every screen: title at y=0, divider rule at y=9. The old
+    # per-screen idiom (title at y=2, rule at y=11, content at y=14) cost 14px before any
+    # content; this costs ~9px, so every screen reclaims ~one content row. Content now
+    # starts at y=11. demo/show_rec draw the corner badges the old code did inline.
+    oled.text(title, 2, 0)
+    if demo:
+        oled.text("DEMO", 100, 0)
+    elif show_rec:
+        draw_rec_indicator(oled, anim_tick)
+    oled.hline(0, 9, 128, 1)
 
 # Demo Mode status
 demo_mode = bridge_cfg.get("demo_on_boot", False)
 last_demo_switch_t = time.ticks_ms() if demo_mode else 0
+boot_ms = time.ticks_ms()   # for the Screen 0 uptime stat
 
 # Terminal sniffer history
 sniffer_mode = 0  # 0: ASCII scrolling, 1: Hex dump
-terminal_lines = ["", "", "", "", ""]
-hex_history = []  # Last 20 bytes for hex dump
+terminal_lines = ["", "", "", "", "", ""]   # 6 lines x 21 cols (rendered in the 5x7 font)
+hex_history = []  # last 30 bytes for hex dump (6 rows x 5 bytes, 5x7 font)
 
 yawn_end_t = 0
 last_active_state = False
@@ -373,7 +510,7 @@ def add_to_terminal(b):
     global terminal_lines
     if b == 10:  # LF (\n) -> start a new line
         terminal_lines.append("")
-        terminal_lines = terminal_lines[-5:]
+        terminal_lines = terminal_lines[-6:]
     elif b == 13:  # CR (\r) -> ignore
         pass
     elif b == 9:  # Tab (\t) -> render as spaces
@@ -384,10 +521,10 @@ def add_to_terminal(b):
             c = chr(b)
         else:
             c = "."  # substitute unprintable codes with dot
-        
-        if len(terminal_lines[-1]) >= 16:
+
+        if len(terminal_lines[-1]) >= 21:   # 5x7 font fits 21 cols (was 16 in the 8x8 font)
             terminal_lines.append("")
-            terminal_lines = terminal_lines[-5:]
+            terminal_lines = terminal_lines[-6:]
         terminal_lines[-1] += c
 
 # ----------------- I2C Scanner Database -----------------
@@ -584,7 +721,7 @@ def exit_demo():
     screen = 0
     tx_bytes = 0
     rx_bytes = 0
-    terminal_lines = ["", "", "", "", ""]
+    terminal_lines = ["", "", "", "", "", ""]
     hex_history = []
     apply_signal_generator()
     if bridge_cfg.get("demo_on_boot", False):
@@ -653,8 +790,8 @@ def handle_short_press():
         # SD Card Explorer
         global sd_view_active, sd_view_offset, sd_view_file, sd_menu_idx, sd_confirm_t, sd_confirm_pending
         if sd_view_active:
-            sd_view_offset += 4
-            lines = get_file_lines("/sd/" + sd_view_file, sd_view_offset, num_lines=4)
+            sd_view_offset += 5            # page by the 5 rows the viewer now shows
+            lines = get_file_lines("/sd/" + sd_view_file, sd_view_offset, num_lines=5)
             if not lines:
                 sd_view_active = False
                 beep(1200, 60)
@@ -866,7 +1003,7 @@ try:
                     for b in s.encode():
                         add_to_terminal(b)
                         hex_history.append(b)
-                        if len(hex_history) > 20:
+                        if len(hex_history) > 30:
                             hex_history.pop(0)
                     add_to_terminal(10)
             elif screen == 3:
@@ -1095,7 +1232,7 @@ try:
                             add_to_terminal(b)
                             # Feed hex history
                             hex_history.append(b)
-                            if len(hex_history) > 20:
+                            if len(hex_history) > 30:
                                 hex_history.pop(0)
                         set_leds(False, True, False)
         
@@ -1153,16 +1290,14 @@ try:
             if screen == 0:
                 # SCREEN 0: MASCOT / STATS
                 oled.fill(0)
-                oled.text("[ UART BRIDGE ]", 4, 2)
-                if demo_mode:
-                    oled.text("DEMO", 100, 2)
-                else:
-                    draw_rec_indicator(oled, anim_tick)
-                oled.hline(0, 11, 128, 1)
-                oled.text(f"Baud:{BAUDRATE}", 4, 16)
-                oled.text(f"TX:  {fmt_bytes(tx_bytes)}B", 4, 28)
-                oled.text(f"RX:  {fmt_bytes(rx_bytes)}B", 4, 40)
-                oled.text("USB <-> UART", 4, 52)
+                draw_header(oled, "[ UART BRIDGE ]", anim_tick, demo_mode, show_rec=True)
+                up = time.ticks_diff(time.ticks_ms(), boot_ms) // 1000
+                up_str = f"{up // 60}m{up % 60:02d}s" if up >= 60 else f"{up}s"
+                oled.text(f"Baud:{BAUDRATE}", 4, 12)
+                oled.text(f"TX:{fmt_bytes(tx_bytes)}B", 4, 22)
+                oled.text(f"RX:{fmt_bytes(rx_bytes)}B", 4, 32)
+                oled.text(f"Up:{up_str}", 4, 42)
+                oled.text("USB<->UART", 4, 52)
                 draw_cat(oled, is_active, anim_tick, last_type)
                 oled.show()
                 
@@ -1170,36 +1305,29 @@ try:
                 # SCREEN 1: SNIFFER TERMINAL
                 oled.fill(0)
                 title = "[ HEX SNIFFER ]" if sniffer_mode == 1 else "[ UART RX LOG ]"
-                oled.text(title, 6, 2)
-                if demo_mode:
-                    oled.text("DEMO", 100, 2)
-                else:
-                    draw_rec_indicator(oled, anim_tick)
-                oled.hline(0, 11, 128, 1)
+                draw_header(oled, title, anim_tick, demo_mode, show_rec=True)
                 if sniffer_mode == 0:
+                    # 5x7 font -> 6 lines of 21 cols (was 5 lines of 16 in the 8x8 font).
                     for idx, line in enumerate(terminal_lines):
-                        oled.text(line, 4, 14 + idx * 10)
+                        text_small(oled, line, 2, 11 + idx * 9)
                 else:
-                    # Formatted hex dump: 5 lines, 4 bytes each
-                    for idx in range(5):
-                        start = idx * 4
-                        chunk = hex_history[start:start+4]
+                    # Hex dump in the 5x7 font: 6 rows x 5 bytes + ASCII gutter (was 5 x 4).
+                    for idx in range(6):
+                        start = idx * 5
+                        chunk = hex_history[start:start + 5]
                         if not chunk:
                             break
                         hex_str = " ".join(f"{b:02X}" for b in chunk)
-                        hex_str += " " * (11 - len(hex_str))
+                        hex_str += " " * (14 - len(hex_str))
                         ascii_str = "".join(chr(b) if 32 <= b <= 126 else "." for b in chunk)
-                        oled.text(f"{hex_str} {ascii_str}", 4, 14 + idx * 10)
+                        text_small(oled, f"{hex_str} {ascii_str}", 2, 11 + idx * 9)
                 oled.show()
                 
             elif screen == 2:
                 # SCREEN 2: I2C SCANNER
                 oled.fill(0)
-                oled.text("[ I2C SCANNER ]", 6, 2)
-                if demo_mode:
-                    oled.text("DEMO", 100, 2)
-                oled.hline(0, 11, 128, 1)
-                
+                draw_header(oled, "[ I2C SCANNER ]", anim_tick, demo_mode)
+
                 # Draw rotating radar sweep graphic on the right
                 rx = 104
                 ry = 38
@@ -1220,19 +1348,19 @@ try:
                     oled.pixel(rx - 8, ry + 4, 1)
 
                 if not i2c_devices:
-                    oled.text("Scanning...", 4, 28)
+                    oled.text("Scanning...", 4, 26)
                 else:
                     if len(i2c_devices) <= 4:
                         for idx, addr in enumerate(i2c_devices):
                             name = KNOWN_I2C.get(addr, "Dev")
-                            oled.text(f"0x{addr:02X}:{name[:7]}", 4, 14 + idx * 12)
+                            oled.text(f"0x{addr:02X}:{name[:7]}", 4, 12 + idx * 12)
                     else:
                         # Draw list of addresses in 2 columns
                         for idx, addr in enumerate(i2c_devices[:10]):
                             col = idx // 5
                             row = idx % 5
                             x = 4 + col * 40
-                            y = 14 + row * 10
+                            y = 12 + row * 10
                             oled.text(f"0x{addr:02X}", x, y)
                 oled.show()
                 
@@ -1258,10 +1386,7 @@ try:
                 
                 # Render Scope waveforms
                 title = f"{scope_names[scope_mode]}" if not demo_mode else "Sine Wave"
-                oled.text(title, 4, 2)
-                if demo_mode:
-                    oled.text("DEMO", 100, 2)
-                oled.hline(0, 11, 128, 1)
+                draw_header(oled, title, anim_tick, demo_mode)
                 for x in range(len(osc_samples) - 1):
                     oled.line(x, osc_samples[x], x + 1, osc_samples[x + 1], 1)
                 
@@ -1283,11 +1408,8 @@ try:
                 # SCREEN 4: GPIO STATE MONITOR / LOGIC ANALYZER PROBE
                 oled.fill(0)
                 if gpio_sel_idx == -1:
-                    oled.text("[ GPIO MONITOR ]", 4, 2)
-                    if demo_mode:
-                        oled.text("DEMO", 100, 2)
-                    oled.hline(0, 11, 128, 1)
-                    
+                    draw_header(oled, "[ GPIO MONITOR ]", anim_tick, demo_mode)
+
                     # Draw visual board map layout
                     oled.rect(36, 14, 56, 48, 1)
                     # USB Connector at top
@@ -1351,11 +1473,8 @@ try:
                 else:
                     # Individual Logic Probe Waveform screen
                     p_num, label = PINS_TO_MONITOR[gpio_sel_idx]
-                    oled.text(f"[ PROBE {label} (GP{p_num}) ]", 4, 2)
-                    if demo_mode:
-                        oled.text("DEMO", 100, 2)
-                    oled.hline(0, 11, 128, 1)
-                    
+                    draw_header(oled, f"PROBE {label} (GP{p_num})", anim_tick, demo_mode)
+
                     # Draw logic level scrolling waveforms
                     for x in range(len(logic_samples) - 1):
                         y1 = logic_samples[x]
@@ -1370,30 +1489,27 @@ try:
                     oled.text("H", 82, 21)
                     oled.text("L", 82, 45)
                     
-                    # Sidebar Stats
-                    oled.vline(94, 12, 52, 1)
+                    # Sidebar stats in the 5x7 font (the 8x8 "State:" ran off past x=128).
+                    oled.vline(94, 11, 53, 1)
                     if demo_mode:
                         cur_val = 1 if logic_samples[-1] == 24 else 0
                     else:
                         cur_val = Pin(p_num).value()
-                    oled.text("State:", 98, 16)
-                    oled.text("HIGH" if cur_val == 1 else "LOW", 98, 28)
-                    oled.text("Press", 98, 44)
-                    oled.text("BACK", 98, 54)
+                    text_small(oled, "STATE", 97, 13)
+                    text_small(oled, "HIGH" if cur_val == 1 else "LOW", 97, 23)
+                    text_small(oled, "tap=", 97, 46)
+                    text_small(oled, "back", 97, 55)
                 oled.show()
                 
             elif screen == 5:
                 # SCREEN 5: PWM SIGNAL LAB (Gen + Meter)
                 oled.fill(0)
-                oled.text("[ PWM LAB ]", 6, 2)
-                if demo_mode:
-                    oled.text("DEMO", 100, 2)
-                oled.hline(0, 11, 128, 1)
-                
+                draw_header(oled, "[ PWM LAB ]", anim_tick, demo_mode)
+
                 # Top Box: PWM Generator (GP28 / D2)
                 freq = GEN_FREQS[gen_idx] if not demo_mode else 1000
                 freq_str = f"{freq}Hz" if freq > 0 else "OFF"
-                oled.text(f"OUT D2: {freq_str}", 4, 16)
+                oled.text(f"OUT D2: {freq_str}", 4, 13)
                 
                 # Bottom Box: PWM Meter (GP2 / D8)
                 if pwm_freq_val > 0.0:
@@ -1405,9 +1521,9 @@ try:
                 else:
                     meter_freq_str = "0Hz"
                     meter_duty_str = "100%" if meter_pin.value() == 1 else "0%"
-                oled.text(f"IN D8 : {meter_freq_str}", 4, 32)
-                oled.text(f"Duty  : {meter_duty_str}", 4, 44)
-                oled.text("D2->PWM  D8->Meter", 4, 55)
+                oled.text(f"IN D8 : {meter_freq_str}", 4, 28)
+                oled.text(f"Duty  : {meter_duty_str}", 4, 40)
+                oled.text("D2->PWM  D8->Meter", 4, 54)
                 
                 # Simple generator animated block on top right
                 oled.rect(98, 14, 26, 14, 1)
@@ -1424,19 +1540,16 @@ try:
             elif screen == 6:
                 # SCREEN 6: COMMAND MACRO SENDER
                 oled.fill(0)
-                oled.text("[ MACRO SENDER ]", 6, 2)
-                if demo_mode:
-                    oled.text("DEMO", 100, 2)
-                oled.hline(0, 11, 128, 1)
-                
-                start_item = max(0, macro_idx - 3)
-                if start_item + 4 > len(macro_items):
-                    start_item = len(macro_items) - 4
+                draw_header(oled, "[ MACRO SENDER ]", anim_tick, demo_mode)
+
+                start_item = max(0, macro_idx - 4)
+                if start_item + 5 > len(macro_items):
+                    start_item = len(macro_items) - 5
                 if start_item < 0:
                     start_item = 0
-                
-                for idx in range(start_item, min(start_item + 4, len(macro_items))):
-                    y = 16 + (idx - start_item) * 12
+
+                for idx in range(start_item, min(start_item + 5, len(macro_items))):
+                    y = 11 + (idx - start_item) * 10
                     prefix = "> " if idx == macro_idx else "  "
                     oled.text(prefix + macro_items[idx], 4, y)
                 
@@ -1449,19 +1562,16 @@ try:
             elif screen == 7:
                 # SCREEN 7: BAUD RATE SELECTOR
                 oled.fill(0)
-                oled.text("[ BAUD SELECT ]", 6, 2)
-                if demo_mode:
-                    oled.text("DEMO", 100, 2)
-                oled.hline(0, 11, 128, 1)
-                
-                start_item = max(0, menu_idx - 3)
-                if start_item + 4 > len(menu_items):
-                    start_item = len(menu_items) - 4
+                draw_header(oled, "[ BAUD SELECT ]", anim_tick, demo_mode)
+
+                start_item = max(0, menu_idx - 4)
+                if start_item + 5 > len(menu_items):
+                    start_item = len(menu_items) - 5
                 if start_item < 0:
                     start_item = 0
-                
-                for idx in range(start_item, min(start_item + 4, len(menu_items))):
-                    y = 16 + (idx - start_item) * 12
+
+                for idx in range(start_item, min(start_item + 5, len(menu_items))):
+                    y = 11 + (idx - start_item) * 10
                     prefix = "> " if idx == menu_idx else "  "
                     item_text = menu_items[idx]
                     if idx > 0:
@@ -1479,13 +1589,10 @@ try:
             elif screen == 8:
                 # SCREEN 8: DEMO TRIGGER MENU
                 oled.fill(0)
-                oled.text("[ DEMO TRIGGER ]", 4, 2)
-                if demo_mode:
-                    oled.text("DEMO", 100, 2)
-                oled.hline(0, 11, 128, 1)
-                
+                draw_header(oled, "[ DEMO TRIGGER ]", anim_tick, demo_mode)
+
                 for idx, item in enumerate(demo_trigger_items):
-                    y = 18 + idx * 14
+                    y = 14 + idx * 14
                     prefix = "> " if idx == demo_trigger_idx else "  "
                     oled.text(prefix + item, 4, y)
                 
@@ -1498,40 +1605,34 @@ try:
             elif screen == 9:
                 # SCREEN 9: SD CARD FILE EXPLORER
                 oled.fill(0)
-                oled.text("[ SD EXPLORER ]", 4, 2)
-                if demo_mode:
-                    oled.text("DEMO", 100, 2)
-                else:
-                    draw_rec_indicator(oled, anim_tick)
-                oled.hline(0, 11, 128, 1)
-                
                 if sd_view_active:
-                    title = f"/{sd_view_file[:10]}"
-                    oled.text(f"VIEW: {title}", 4, 14)
-                    oled.hline(0, 23, 128, 1)
-                    
-                    lines = get_file_lines("/sd/" + sd_view_file, sd_view_offset, num_lines=4)
+                    # In the file viewer the slim header doubles as the filename bar, so the
+                    # old separate "VIEW:" sub-header is gone -> more rows for file content.
+                    draw_header(oled, ("/" + sd_view_file)[:20], anim_tick, demo_mode, show_rec=True)
+                    lines = get_file_lines("/sd/" + sd_view_file, sd_view_offset, num_lines=5)
                     if not lines:
-                        oled.text("(end of file)", 4, 32)
+                        text_small(oled, "(end of file)", 2, 12)
                     else:
+                        # 5x7 font: 5 rows of 21 cols (was 4 rows of 16 in the 8x8 font).
                         for idx, line in enumerate(lines):
-                            oled.text(line[:16], 4, 26 + idx * 9)
-                    oled.text("ShortPress: scroll", 4, 56)
+                            text_small(oled, line[:21], 2, 11 + idx * 8)
+                    text_small(oled, "tap = scroll down", 2, 55)
                 else:
-                    start_item = max(0, sd_menu_idx - 3)
-                    if start_item + 4 > len(sd_menu_items):
-                        start_item = len(sd_menu_items) - 4
+                    draw_header(oled, "[ SD EXPLORER ]", anim_tick, demo_mode, show_rec=True)
+                    start_item = max(0, sd_menu_idx - 4)
+                    if start_item + 5 > len(sd_menu_items):
+                        start_item = len(sd_menu_items) - 5
                     if start_item < 0:
                         start_item = 0
-                        
-                    for idx in range(start_item, min(start_item + 4, len(sd_menu_items))):
-                        y = 16 + (idx - start_item) * 12
+
+                    for idx in range(start_item, min(start_item + 5, len(sd_menu_items))):
+                        y = 11 + (idx - start_item) * 10
                         prefix = "> " if idx == sd_menu_idx else "  "
                         item_text = sd_menu_items[idx]
                         if len(item_text) > 14:
                             item_text = item_text[:11] + "..."
                         oled.text(prefix + item_text, 4, y)
-                        
+
                     if sd_confirm_pending:
                         rem_t = max(0, time.ticks_diff(sd_confirm_t, time.ticks_ms()))
                         bar_w = int(128 * (rem_t / 2000))
