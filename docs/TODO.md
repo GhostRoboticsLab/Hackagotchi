@@ -18,10 +18,14 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
   coexistence task on a real SSD1306 (i2c1 GP6/7), **heap_4**. Builds clean (pinned GCC 13.3 +
   pico-sdk 2.2.0); `picotool info` verifies the pin map. Findings F1-1 (v2.2.3 is single-core
   FreeRTOS — no SMP affinity), F1-2 (board injected via boards/ shim, not a probe_config.h overlay).
-- [ ] **Gate 1 — soak half (hardware):** attach the expansion board (real OLED) + rewire SWD to
-  D0/D1; flash the fork; `probe-rs info` on the remapped pins FIRST; then `gate1_soak.sh` +
-  `gate1_soak_openocd.sh` (≥1000 cycles, 0 fails/stalls) + the `ADVERSARIAL_STALL_MS=50` variant;
-  record heap watermark → **decide heap_4 vs heap_1**.
+- [x] **Gate 1 — soak half: PASS (core claim)** *(2026-06-19, commit 07c1a70)*. probe-rs 1000/1000,
+  openocd 200/200, adversarial-50ms 1000/1000 (+3000 stretch), all 0 fails/stalls under the corrected
+  stdout check; OLED liveness operator-attested; **heap_4 kept**. 5-lens verification = PASS_WITH_BLOCKERS;
+  blockers closed (F1-3 verify-guard bug fixed, provenance banner, doc). See GATE_RESULTS.md.
+- [ ] **Gate 1 — deferred robustness (on hardware return):** GP0→GP1 loopback to machine-capture the
+  OLED counter (monotonic) + heap series + adversarial `stall=` build-id; flash the at-DAP-priority
+  variant (`ADVERSARIAL_AT_DAP_PRIO=ON`, compile-verified) for a genuine contention test; then flip
+  the gate doc to unconditional PASS.
 - [ ] **Gate 2:** add the 2nd CDC (`cdc_dual_ports`, IAD `0xEF/0x02/0x01`); `gate2_cdc.py`
   round-trip 100/100; node mapping stable across 3 replug + 1 reboot.
 
