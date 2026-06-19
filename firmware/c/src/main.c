@@ -70,7 +70,14 @@ static uint8_t RxDataBuffer[CFG_TUD_HID_EP_BUFSIZE];
 #define DAP_TASK_PRIO  (tskIDLE_PRIORITY + 1)
 // [HACKAGOTCHI] 2/3 — the OLED coexistence task is STRICTLY below DAP so it can never delay the
 // probe path (single-core FreeRTOS, configNUM_CORES=1; the only guarantee is priority/preemption).
+#ifdef ADVERSARIAL_AT_DAP_PRIO
+// ADVERSARIAL-ONLY: run the stress task AT DAP's priority so a busy_wait genuinely TIME-SLICES with
+// DAP (defeats the "preempted in ~50us" no-op). This is NOT a product config — it deliberately
+// violates the strict-below-DAP rule to probe DAP's buffer-handoff under real contention.
+#define DASHBOARD_TASK_PRIO  (tskIDLE_PRIORITY + 1)
+#else
 #define DASHBOARD_TASK_PRIO  (tskIDLE_PRIORITY + 0)
+#endif
 #define DASHBOARD_TASK_STACK 1024
 
 TaskHandle_t dap_taskhandle, tud_taskhandle, mon_taskhandle;

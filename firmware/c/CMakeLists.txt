@@ -33,6 +33,9 @@ endif ()
 # Optional adversarial stress: a busy_wait_us(ms*1000) per OLED loop (the "slow SD write" proxy).
 # Default 0 (off). Build the 50 ms variant with: cmake -DADVERSARIAL_STALL_MS=50 …
 set(ADVERSARIAL_STALL_MS 0 CACHE STRING "Gate-1 adversarial stall (ms) injected into the OLED task")
+# Adversarial-only: run the OLED stress task AT DAP priority so a busy_wait genuinely time-slices
+# with DAP (the idle-priority stall is preempted in ~50us = a no-op threat). NOT a product config.
+option(ADVERSARIAL_AT_DAP_PRIO "Run the OLED stress task at DAP priority (adversarial contention test)" OFF)
 
 add_executable(hackagotchi_probe
         # --- OUR overlay (shadows upstream main.c/probe_config.h; adds the OLED coexistence task) ---
@@ -79,6 +82,9 @@ target_compile_definitions(hackagotchi_probe PRIVATE
         PICO_RP2040_USB_DEVICE_ENUMERATION_FIX=1
         ADVERSARIAL_STALL_MS=${ADVERSARIAL_STALL_MS}
 )
+if(ADVERSARIAL_AT_DAP_PRIO)
+    target_compile_definitions(hackagotchi_probe PRIVATE ADVERSARIAL_AT_DAP_PRIO=1)
+endif()
 
 target_link_libraries(hackagotchi_probe PRIVATE
         pico_multicore

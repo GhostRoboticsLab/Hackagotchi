@@ -26,8 +26,12 @@ is_stall(){ [ "$1" -eq 124 ] || [ "$1" -eq 137 ]; }
 echo "GATE 1 openocd soak: N=$N  -> $log"
 for i in $(seq 1 "$N"); do
   elf=$([ $((i % 2)) -eq 0 ] && echo "$ELF_A" || echo "$ELF_B")
-  if ! TMO 60 openocd -f interface/cmsis-dap.cfg -f target/rp2040.cfg \
-        -c "init; reset halt; flash write_image erase $elf; verify_image $elf; reset run; exit" \
+  # Explicit driver/transport/speed (matches the Gate-0-proven gate0_check.sh invocation) rather
+  # than `-f interface/cmsis-dap.cfg` — the explicit form is the one validated on this host/openocd.
+  if ! TMO 60 openocd -c "adapter driver cmsis-dap" -c "transport select swd" -c "adapter speed 1000" \
+        -f target/rp2040.cfg \
+        -c "init" -c "reset halt" -c "flash write_image erase $elf" -c "verify_image $elf" \
+        -c "reset run" -c "exit" \
         >>"$log" 2>&1; then
     rc=$?
     if is_stall "$rc"; then echo "STALL/TIMEOUT cycle $i" | tee -a "$log"; stalls=$((stalls+1));
