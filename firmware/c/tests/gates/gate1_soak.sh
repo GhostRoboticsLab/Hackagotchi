@@ -34,6 +34,13 @@ is_stall(){ [ "$1" -eq 124 ] || [ "$1" -eq 137 ]; }
 echo "GATE 1 soak: N=$N chip=$CHIP  A=$(basename "$ELF_A") B=$(basename "$ELF_B")  -> $log"
 echo "Confirm BEFORE running: probe-rs info reads the target on the REMAPPED pins, OLED counter is ticking." | tee -a "$log"
 
+# Provenance banner — tee proof-of-which-firmware/pins into the log so a reader can attribute the run
+# to the locked GP26/27 fork (the CMSIS serial is the RP2040 flash unique-id, NOT firmware-specific).
+{ echo "=== PROVENANCE $(date -u +%FT%TZ) ==="; probe-rs list 2>&1 | grep -i cmsis
+  echo "--- probe-rs info (target must answer on the REMAPPED pins) ---"
+  TMO 25 probe-rs info --chip "$CHIP" --protocol swd 2>&1 | grep -iE "Part:|ROM Table|Multidrop|did not respond"
+  echo "=== END PROVENANCE ==="; } >>"$log" 2>&1
+
 for i in $(seq 1 "$N"); do
   elf=$([ $((i % 2)) -eq 0 ] && echo "$ELF_A" || echo "$ELF_B")
   if ! TMO 30 probe-rs download --chip "$CHIP" --verify "$elf" >>"$log" 2>&1; then
@@ -46,8 +53,15 @@ for i in $(seq 1 "$N"); do
     probe-rs list >>"$log" 2>&1
     system_profiler SPUSBDataType 2>/dev/null | grep -iA6 CMSIS >>"$log" 2>&1
   fi
-  # independent re-verify (a separate connection — catches a download that lied about verifying)
-  if ! TMO 30 probe-rs verify --chip "$CHIP" "$elf" >>"$log" 2>&1; then
+  # independent re-verify (a separate connection — catches a download that lied about verifying).
+  # CRITICAL: `probe-rs verify` (0.31) prints "Verification failed: contents do not match" but STILL
+  # EXITS 0 on a mismatch — so we must decide by STDOUT, never by exit code (the old `if ! ...` was a
+  # no-op guard). A stall still shows via the timeout exit code.
+  vout=$(TMO 30 probe-rs verify --chip "$CHIP" "$elf" 2>&1); vrc=$?
+  echo "$vout" >>"$log"
+  if is_stall "$vrc"; then
+    echo "REVERIFY-STALL cycle $i" | tee -a "$log"; stalls=$((stalls+1))
+  elif echo "$vout" | grep -q "Verification failed" || ! echo "$vout" | grep -q "Verification successful"; then
     echo "REVERIFY-MISMATCH cycle $i" | tee -a "$log"; fails=$((fails+1))
   fi
   [ $((i % 50)) -eq 0 ] && echo "  ...$i/$N (fails=$fails stalls=$stalls)"

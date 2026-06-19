@@ -15,6 +15,7 @@ GCC_DIR="${GCC_DIR:-/Volumes/MacSSD1/DeveloperWorkspace/fw-build/arm-gnu-toolcha
 PICO_SDK_PATH="${PICO_SDK_PATH:-/Volumes/MacSSD1/DeveloperWorkspace/fw-build/micropython/lib/pico-sdk}"
 BUILD_DIR="${BUILD_DIR:-$HERE/build}"
 ADVERSARIAL_STALL_MS="${ADVERSARIAL_STALL_MS:-0}"
+ADVERSARIAL_AT_DAP_PRIO="${ADVERSARIAL_AT_DAP_PRIO:-OFF}"
 
 [ -x "$GCC_DIR/bin/arm-none-eabi-gcc" ] || { echo "pinned Arm GCC not found at $GCC_DIR/bin"; exit 1; }
 [ -d "$PICO_SDK_PATH" ] || { echo "pico-sdk not found at $PICO_SDK_PATH"; exit 1; }
@@ -41,6 +42,7 @@ cd "$BUILD_DIR"
 cmake "$HERE" \
     -DPICO_SDK_PATH="$PICO_SDK_PATH" \
     -DADVERSARIAL_STALL_MS="$ADVERSARIAL_STALL_MS" \
+    -DADVERSARIAL_AT_DAP_PRIO="$ADVERSARIAL_AT_DAP_PRIO" \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 make -j
 
