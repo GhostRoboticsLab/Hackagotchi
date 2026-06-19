@@ -1,0 +1,10 @@
+# Fetched on demand by setup.sh — not vendored (the product fork lives on the org remote).
+upstream/
+
+# Build outputs
+build/
+
+# Gate-run evidence (regenerated on hardware; keep templates/scripts, not run artifacts)
+tests/gates/gate0/
+tests/gates/gate1/
+tests/gates/gate2/
