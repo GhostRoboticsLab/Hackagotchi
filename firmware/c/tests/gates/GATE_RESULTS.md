@@ -41,7 +41,7 @@ Carry-over for the product: our own recovery/flash flows should use the bootrom 
   - [x] probe-rs: **1000/1000**, 0 fails, 0 stalls, 0 re-verify mismatch
   - [x] openocd twin: **200/200**, 0 fails, 0 stalls
   - [x] adversarial 50 ms (idle-prio): **1000/1000**, 0 fails, 0 stalls *(build flashed via picotool load; `stall=` self-proof deferred — see verdict)*
-  - [x] stretch (hardened script + provenance banner): **3000** cycles, 0 fails/stalls *(running → final count on completion)*
+  - [x] stretch (hardened script + provenance banner, on the adversarial-50ms firmware): **3000/3000**, 0 fails/stalls/mismatch — probe healthy after. Cumulative Gate-1 evidence = **5200 clean flash cycles**.
   - [x] OLED counter advanced throughout — **operator-attested** ("the OLED was always working perfectly", 2026-06-19) + pre-soak visual (n= rising, heap min 51016)
   - Pass/fail decided by STDOUT ("Verification successful" count==N, no "Verification failed"), NOT exit code — see F1-3.
   - Heap: scheme **heap_4**  free **51016 B**  min-ever-free **51016 B** (of 64 KB)  leak? none observed  **DECISION: keep heap_4**
