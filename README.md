@@ -166,6 +166,7 @@ back as `cmd ...` lines on the telemetry stream (visible in the Sniffer screen):
 | `g` | `gc.collect()` then report free / allocated RAM |
 | `d` | Dump a compact state snapshot (page, key list, free RAM) |
 | `R` | Reboot the Pico |
+| `B` | Drop the Pico into **BOOTSEL** (UF2 bootloader) for a remote flash — works when USB-CDC is wedged and no one can press the button; the host then runs `picotool load` over the resulting BOOTSEL USB |
 
 Send them either from the host (`echo -n n > /dev/cu.usbmodem21201`) or straight from the
 bridge by loading them as **macros** (Screen 6): `{"cfg": {"macros": ["n", "p", "r", "g", "d"]}}`.
