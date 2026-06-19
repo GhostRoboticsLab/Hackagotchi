@@ -63,6 +63,10 @@ void dashboard_task(void *ptr) {
     // xPortGet*HeapSize() numbers below cleanly reflect task/RTOS allocations (the heap_4/heap_1
     // decision metric).
     ssd1306_t disp;
+    // MUST set before init: external_vcc is the only field ssd1306_init() READS but does not set.
+    // The expansion OLED runs off the internal charge pump, so false => init sends 0x8D,0x14 (pump
+    // ON). A garbage stack value here sends 0x8D,0x10 (pump OFF) => no boost voltage => DARK panel.
+    disp.external_vcc = false;
     bool ok = ssd1306_init(&disp, 128, 64, DASH_I2C_ADDR, DASH_I2C_INST);
 
     uint32_t counter = 0;
