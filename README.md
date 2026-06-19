@@ -1,6 +1,10 @@
-# XIAO UART Bridge & Pocket Debugging Suite 🛠️
+# PocketTap 🛠️ — a black-box flight recorder for dev boards that go dark
 
-This directory contains the custom MicroPython bridge firmware designed to turn a **Seeed Studio XIAO RP2040** mounted on its **base expansion board** into an interactive serial adapter and pocket debugging suite.
+**PocketTap** is custom MicroPython firmware that turns a **Seeed Studio XIAO RP2040** on its **base expansion board** into a pocket black-box recorder and debugging suite for *other* dev boards.
+
+The pitch: a target board's own debug channel (USB-CDC, the REPL) goes dark exactly when you need it most — during an e-paper refresh, a TLS handshake, or a crash. PocketTap is a *separate* MCU with its own USB, a hardware UART tap, an OLED, a battery-backed RTC, and a microSD recorder, so it keeps **watching and driving** the target while that board is wedged — logging autonomously to SD with a wall-clock timestamp, on a screen, with no host attached. It's a flight recorder, not a tethered dumb adapter.
+
+> Built on a Seeed XIAO RP2040; runs as a single `main.py`. Flash with `mpremote connect <port> cp pockettap/main.py :main.py` then `reset`.
 
 ---
 

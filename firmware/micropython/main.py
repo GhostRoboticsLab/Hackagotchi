@@ -438,6 +438,22 @@ def draw_header(oled, title, anim_tick=0, demo=False, show_rec=False):
         draw_rec_indicator(oled, anim_tick)
     oled.hline(0, 9, 128, 1)
 
+
+def boot_splash():
+    # Branded power-on identity card (PocketTap wordmark + tagline). Shown once before the
+    # main render loop takes over. Kept static here; the animated reveal lives in the FX kit.
+    if not (oled_present and oled is not None):
+        return
+    try:
+        oled.fill(0)
+        oled.text("PocketTap", 28, 14)
+        oled.hline(22, 26, 84, 1)
+        text_small(oled, "black box for boards", 4, 38)
+        text_small(oled, "that go dark", 28, 48)
+        oled.show()
+    except Exception:
+        pass
+
 # Demo Mode status
 demo_mode = bridge_cfg.get("demo_on_boot", False)
 last_demo_switch_t = time.ticks_ms() if demo_mode else 0
@@ -1013,11 +1029,15 @@ btn_pressed_time = 0
 btn_state = 1
 
 print("\r\n================================================")
-print("XIAO RP2040 Interactive USB-UART Multi-Tool Active!")
+print(" PocketTap -- black-box recorder for dev boards")
+print(" that go dark (Seeed XIAO RP2040 + expansion)")
 print("Controls:")
 print("  - SHORT Press: Cycle values / Clear stats / Toggle views")
 print("  - LONG Press  (>0.5s): Cycle to next tool/app")
 print("================================================")
+
+boot_splash()
+time.sleep_ms(800)
 
 # --- Watchdog + fault-recovery state -------------------------------------------------
 # The loop body runs under a PER-ITERATION try/except so a transient fault (a bad byte,
