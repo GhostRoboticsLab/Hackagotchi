@@ -1,0 +1,25 @@
+# Python (host tooling)
+__pycache__/
+*.pyc
+.venv/
+
+# MicroPython cross-compiled bytecode
+*.mpy
+
+# C / Pico SDK build outputs
+build/
+fw-build/
+*.uf2
+*.elf
+*.bin
+*.hex
+*.o
+*.a
+
+# Device-local / never commit
+secrets.py
+bridge_cfg.json
+config.json
+
+# OS
+.DS_Store
