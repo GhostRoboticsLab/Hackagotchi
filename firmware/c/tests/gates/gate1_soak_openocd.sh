@@ -16,14 +16,21 @@ fails=0; stalls=0
 command -v openocd >/dev/null 2>&1 || { echo "openocd not found (brew install open-ocd)"; exit 2; }
 for f in "$ELF_A" "$ELF_B"; do [ -f "$f" ] || { echo "missing fixture: $f"; exit 2; }; done
 
+# portable timeout — stock macOS has no `timeout`. Prefer gtimeout (brew install coreutils),
+# else a background+watchdog fallback. A timed-out call returns 124 (gtimeout) or 137 (kill -9).
+if command -v gtimeout >/dev/null 2>&1; then TMO(){ gtimeout "$@"; }
+elif command -v timeout  >/dev/null 2>&1; then TMO(){ timeout  "$@"; }
+else TMO(){ local t="$1"; shift; "$@" & local p=$!; ( sleep "$t"; kill -9 "$p" 2>/dev/null ) & local w=$!; wait "$p" 2>/dev/null; local rc=$?; kill "$w" 2>/dev/null; return "$rc"; }; fi
+is_stall(){ [ "$1" -eq 124 ] || [ "$1" -eq 137 ]; }
+
 echo "GATE 1 openocd soak: N=$N  -> $log"
 for i in $(seq 1 "$N"); do
   elf=$([ $((i % 2)) -eq 0 ] && echo "$ELF_A" || echo "$ELF_B")
-  if ! timeout 60 openocd -f interface/cmsis-dap.cfg -f target/rp2040.cfg \
+  if ! TMO 60 openocd -f interface/cmsis-dap.cfg -f target/rp2040.cfg \
         -c "init; reset halt; flash write_image erase $elf; verify_image $elf; reset run; exit" \
         >>"$log" 2>&1; then
     rc=$?
-    if [ "$rc" -eq 124 ]; then echo "STALL/TIMEOUT cycle $i" | tee -a "$log"; stalls=$((stalls+1));
+    if is_stall "$rc"; then echo "STALL/TIMEOUT cycle $i" | tee -a "$log"; stalls=$((stalls+1));
     else echo "FAIL(rc=$rc) cycle $i" | tee -a "$log"; fails=$((fails+1)); fi
     system_profiler SPUSBDataType 2>/dev/null | grep -iA6 CMSIS >>"$log" 2>&1
   fi
