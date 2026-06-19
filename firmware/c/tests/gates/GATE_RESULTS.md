@@ -28,16 +28,41 @@ hardware/wiring fault (the same probe+target mass-erase fine via openocd). `gate
 full mass-erase through openocd and gets the per-region sector-erase proof from `probe-rs download --verify`.
 Carry-over for the product: our own recovery/flash flows should use the bootrom block-erase, not probe-rs erase.
 
-## GATE 1 — fork + SWD-remap + OLED task survives sustained flash  ·  [ PASS / FAIL ]
-- Fork base: `debugprobe-v2.2.3`  Fork SHA: ______
-- [ ] remapped SWD verified by `probe-rs info` **before** the soak
-- [ ] OLED task pinned core0, DAP on core1
-- [ ] N cycles: ____ (bar ≥ 1000)  fails: ____  stalls: ____  re-verify mismatch: ____ (must be 0)
-- [ ] OLED counter advanced throughout
-- [ ] adversarial 50 ms-stall variant fails: ____ (must be 0)
-- [ ] openocd-client twin soak also clean
-- Heap: scheme = heap__  free = ____ B  min-ever-free = ____ B  leak? ____  **DECISION: heap__**
-- Evidence: `gate1/soak_*.log`, heap plot, OLED timelapse
+## GATE 1 — fork + SWD-remap + OLED task survives sustained flash  ·  [ BUILD DONE — SOAK PENDING ]
+- Fork base: `debugprobe-v2.2.3` (upstream HEAD 466432c)  Fork build commit: **2158e3d** (2026-06-19)
+- **Build half — DONE & statically verified:**
+  - [x] Fork builds clean with pinned Arm GCC 13.3.Rel1 + pico-sdk 2.2.0 (text 62520, copy_to_ram).
+  - [x] Remapped SWD locked: **SWCLK=GP26 (D0), SWDIO=GP27 (D1, button reclaimed)**, adjacent
+        (SWDIO=SWCLK+1 per probe.pio set_consecutive_pindirs), PROBE_IO_RAW. UART0 tap GP0/1.
+        `picotool info -a` confirms pins 26/27 + UART0 + "Hackagotchi Probe (CMSIS-DAP)".
+  - [x] ONE OLED coexistence task at tskIDLE_PRIORITY (lowest), drives a real SSD1306 on i2c1
+        GP6/7; touches only I2C+heap (no tud_* → cannot perturb USB/DAP). heap_4.
+  - [x] Adversarial 50 ms variant available: `ADVERSARIAL_STALL_MS=50 ./build_fork.sh`.
+- **Soak half — PENDING (hardware-in-the-loop):**
+  - [ ] remapped SWD verified by `probe-rs info` **before** the soak (the GP27-button-cap arbiter)
+  - [ ] OLED counter advanced + probe enumerated simultaneously
+  - [ ] N cycles: ____ (bar ≥ 1000)  fails: ____  stalls: ____  re-verify mismatch: ____ (must be 0)
+  - [ ] adversarial 50 ms-stall variant fails: ____ (must be 0)
+  - [ ] openocd-client twin soak (`gate1_soak_openocd.sh`) also clean
+  - Heap: scheme = heap_4  free = ____ B  min-ever-free = ____ B  leak? ____  **DECISION: heap__**
+  - Evidence: `gate1/soak_*.log`, heap plot, OLED timelapse
+
+### Finding F1-1: debugprobe-v2.2.3 is SINGLE-CORE FreeRTOS (the engineering-plan SMP affinity model does NOT apply)
+`src/FreeRTOSConfig.h` sets `configNUM_CORES=1`; no `multicore_launch`/`vTaskCoreAffinitySet` anywhere
+(SMP — and the #189 flash regression — arrived later, via commit 457e048, which is exactly why 2.2.3
+was pinned). So the plan's "DAP on core 1, dashboard on core 0" cannot be used. DAP is the LOWEST of
+the three upstream tasks (UART+3 > TUD+2 > DAP+1); the OLED task is added strictly below DAP
+(tskIDLE_PRIORITY). The DAP guarantee is therefore **priority/preemption**, not core isolation — a
+more conservative gate (the 23 ms ssd1306_show I2C burst, and the adversarial 50 ms busy-wait, are
+both fully preemptible by DAP). When we later spike `debugprobe-v2.3.1`, re-evaluate under real SMP.
+
+### Finding F1-2: board pins injected via a boards/ shim, not a probe_config.h overlay
+The C quote-include rule searches the including file's own directory first, so upstream's `.c` files
+always pick up upstream's adjacent `probe_config.h` regardless of `-I` order — a `src/probe_config.h`
+overlay silently had NO effect (picotool showed the stock GP12/13/14 pins). Fix: shadow
+`board_debug_probe_config.h` (which is NOT adjacent to probe_config.h) from `boards/` instead; the
+unmodified upstream probe_config.h `#include`s it and our copy wins for every TU. The picotool-info
+check is the guard that catches a wrong-board build.
 
 ## GATE 2 — 2nd CDC: two nodes, DAP binds, JSON round-trip  ·  [ PASS / FAIL ]
 - Device class: `0xEF/0x02/0x01` (IAD)  CFG_TUD_CDC=2
