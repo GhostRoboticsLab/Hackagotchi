@@ -307,12 +307,35 @@ poll.register(sys.stdin, select.POLLIN)
 poll.register(uart, select.POLLIN)
 
 # ----------------- Global State -----------------
-# 0: Mascot/Stats, 1: Sniffer, 2: I2C Scanner, 3: Oscilloscope,
-# 4: GPIO Monitor, 5: PWM Gen/Meter, 6: Macro Sender, 7: Baud rate menu,
-# 8: Demo Trigger menu
-screen = 0  
+# 0: Mascot/Stats, 1: Sniffer, 2: I2C Scanner, 3: Oscilloscope, 4: GPIO Monitor,
+# 5: PWM Gen/Meter, 6: Macro Sender, 7: Baud rate menu, 8: Demo Trigger menu,
+# 9: SD Explorer, 10: Watchdog (flight recorder), 11: Throughput meter
+SCREEN_COUNT = 12
+screen = 0
 tx_bytes = 0
 rx_bytes = 0
+
+# ----------------- Flight-recorder watch state -----------------
+# These run as ALWAYS-ON background monitors (not just when their screen is visible) -- the
+# whole point of a black box. The Watchdog screen (10) surfaces the detail; the alerts fire
+# globally (beep + LED + a log mark + a blinking header badge) wherever you are.
+watch_terms = [str(t)[:14] for t in bridge_cfg.get("watch", ["ERROR", "FATAL", "Traceback", "panic", "BUSY-TIMEOUT"])]
+watch_hits = 0
+watch_last = ""            # last matched term + a snippet
+_watch_line = ""           # RX line accumulator for substring matching
+ever_active = False        # have we ever seen target traffic? (don't flag a wedge before)
+last_rx_t = 0              # ticks_ms of the last received byte
+wedge_active = False       # target went silent after being active = a wedge
+wedge_since = ""           # wall-clock / uptime stamp when the wedge was detected
+WEDGE_SILENCE_MS = 8000    # silence after activity that counts as a wedge
+freeze_frame = bytearray() # rolling last ~96 bytes -- the target's dying words
+alert_until = 0            # ticks_ms until the global alert badge stops blinking
+alert_text = ""            # short alert label (shown on the Watchdog screen)
+# Throughput meter
+tp_hist = []               # bytes/sec samples (newest last), capped for the sparkline
+tp_accum = 0               # bytes counted since the last 1 s sample
+tp_last_t = 0
+tp_peak = 0
 
 # ----------------- UART Logger State -----------------
 logging_active = False
@@ -461,6 +484,11 @@ def draw_header(oled, title, anim_tick=0, demo=False, show_rec=False):
     elif show_rec:
         draw_rec_indicator(oled, anim_tick)
     oled.hline(0, 9, 128, 1)
+    # Global alert badge: a blinking inverted "!" at the top-right while an alert is fresh
+    # (a trigger hit or a target wedge). Drawn last so it shows on every screen, over REC.
+    if alert_until and time.ticks_diff(alert_until, time.ticks_ms()) > 0 and (anim_tick // 2) % 2 == 0:
+        oled.fill_rect(118, 0, 9, 9, 1)
+        oled.text("!", 119, 0, 0)
 
 
 def draw_sparkline(oled, data, x, y, w, h, c=1, baseline=False):
@@ -693,6 +721,61 @@ def add_to_terminal(b):
             terminal_lines.append("")
             terminal_lines = terminal_lines[-6:]
         terminal_lines[-1] += c
+
+
+def fire_alert(text, lo=900, hi=1600):
+    # Raise a global, attention-grabbing alert: a two-tone chirp, the red LED, a blinking
+    # header badge, and (if recording) a stamped line in the black box. Used by the trigger
+    # watcher and the wedge detector -- the things you most want to know happened.
+    global alert_until, alert_text
+    alert_text = text[:18]
+    alert_until = time.ticks_add(time.ticks_ms(), 6000)
+    set_leds(True, False, False)
+    beep(hi, 60)
+    time.sleep_ms(35)
+    beep(lo, 90)
+    if logging_active:
+        try:
+            log_uart_data("\n--- ALERT %s %s ---\n" % (log_stamp(), text))
+            flush_log_buffer()
+        except Exception:
+            pass
+
+
+def feed_watch(data):
+    # Per-RX hook: maintain the freeze-frame ring (the target's last words), scan completed
+    # lines for any armed trigger term, and refresh the activity clock so the wedge detector
+    # knows the target is alive. Cheap -- runs on every received chunk.
+    global _watch_line, watch_hits, watch_last, freeze_frame, last_rx_t, ever_active
+    global wedge_active, tp_accum
+    last_rx_t = time.ticks_ms()
+    ever_active = True
+    tp_accum += len(data)
+    # The target spoke -> any prior wedge is over.
+    if wedge_active:
+        wedge_active = False
+        fire_alert("RECOVERED", lo=1600, hi=2400)
+    # Rolling freeze-frame: keep only the last 96 bytes.
+    freeze_frame.extend(data)
+    if len(freeze_frame) > 96:
+        freeze_frame[:] = freeze_frame[-96:]
+    if not watch_terms:
+        return
+    for b in data:
+        if b == 10 or b == 13:
+            line = _watch_line
+            _watch_line = ""
+            if line:
+                for term in watch_terms:
+                    if term and term in line:
+                        watch_hits += 1
+                        watch_last = (term + ": " + line.strip())[:60]
+                        fire_alert("HIT " + term)
+                        break
+        elif 32 <= b <= 126:
+            _watch_line += chr(b)
+            if len(_watch_line) > 200:       # guard against an unterminated flood
+                _watch_line = _watch_line[-200:]
 
 # ----------------- I2C Scanner Database -----------------
 last_i2c_scan = 0
@@ -969,6 +1052,21 @@ def handle_short_press():
                 sd_menu_idx = (sd_menu_idx + 1) % len(sd_menu_items)
                 sd_confirm_t = time.ticks_ms() + 2000
                 sd_confirm_pending = True
+    elif screen == 10:
+        # Watchdog: short-press = acknowledge (clear trigger hits + clear the wedge flag).
+        global watch_hits, watch_last, wedge_active, alert_until
+        watch_hits = 0
+        watch_last = ""
+        wedge_active = False
+        alert_until = 0
+        beep(2000, 20)
+    elif screen == 11:
+        # Throughput: short-press = reset the meter.
+        global tp_peak, tp_accum
+        tp_hist[:] = []
+        tp_peak = 0
+        tp_accum = 0
+        beep(2000, 20)
 
 def handle_long_press():
     global screen, menu_idx, baud_confirm_pending
@@ -995,9 +1093,9 @@ def handle_long_press():
     
     trigger_transition_wipe()
     
-    # Switch screen (10 screens total)
-    screen = (screen + 1) % 10
-    
+    # Switch screen
+    screen = (screen + 1) % SCREEN_COUNT
+
     # Entry prepares
     if screen == 2:
         scan_i2c()
@@ -1015,7 +1113,7 @@ def handle_long_press():
 usb_rx_buf = ""
 
 def process_host_command(line):
-    global BAUDRATE, macro_items, bridge_cfg, demo_mode, last_demo_switch_t, screen, tx_bytes, rx_bytes, logging_active
+    global BAUDRATE, macro_items, bridge_cfg, demo_mode, last_demo_switch_t, screen, tx_bytes, rx_bytes, logging_active, watch_terms
     try:
         data = json.loads(line)
         if "cfg" in data:
@@ -1068,6 +1166,13 @@ def process_host_command(line):
                 bridge_cfg["wdt"] = bool(cfg["wdt"])
                 changed = True
 
+            # 4d. Trigger-watch terms (live): each completed RX line is scanned for these
+            # substrings; a match beeps, flashes, marks the log, and counts on the Watchdog.
+            if "watch" in cfg and isinstance(cfg["watch"], list):
+                watch_terms = [str(t)[:14] for t in cfg["watch"][:8]]
+                bridge_cfg["watch"] = watch_terms
+                changed = True
+
             # 5. Toggle UART Logging
             if "logging" in cfg:
                 if bool(cfg["logging"]):
@@ -1084,7 +1189,7 @@ def process_host_command(line):
                 beep(3000, 40)
                 
                 # Print response back to host
-                res = {"status": "OK", "baud": BAUDRATE, "macros": bridge_cfg["macros"], "demo": demo_mode, "demo_on_boot": bridge_cfg.get("demo_on_boot", False), "logging": logging_active, "log_on_boot": bridge_cfg.get("log_on_boot", False), "log_file": current_log_filename, "wdt": bridge_cfg.get("wdt", False)}
+                res = {"status": "OK", "baud": BAUDRATE, "macros": bridge_cfg["macros"], "demo": demo_mode, "demo_on_boot": bridge_cfg.get("demo_on_boot", False), "logging": logging_active, "log_on_boot": bridge_cfg.get("log_on_boot", False), "log_file": current_log_filename, "wdt": bridge_cfg.get("wdt", False), "watch": watch_terms}
                 print("\r\n" + json.dumps(res) + "\r\n")
                 
                 # Reset local visual selectors
@@ -1168,7 +1273,7 @@ while True:
             if time.ticks_diff(now_ms, last_demo_switch_t) > 7000:
                 last_demo_switch_t = now_ms
                 trigger_transition_wipe()
-                screen = (screen + 1) % 10
+                screen = (screen + 1) % SCREEN_COUNT
                 beep(1800, 20)
                 
                 # Configure screens automatically for full visual loading
@@ -1184,7 +1289,16 @@ while True:
                     sd_menu_items = ["< BACK", "[START LOGGING]", "demo_log.csv", "sys_info.txt"]
                     sd_menu_idx = 0
                     sd_view_active = False
-            
+                elif screen == 10:
+                    watch_hits = 3
+                    watch_last = "FATAL: kernel panic on core1"
+                    wedge_active = True
+                    wedge_since = "12:34:50"
+                    freeze_frame[:] = b"WiFi ok\nGET /api/data\nparsing..\nFATAL: panic core1"
+                elif screen == 11:
+                    tp_hist[:] = []
+                    tp_peak = 480
+
             # 2. Simulate activity ticks
             anim_tick += 1  # speed up animations
             
@@ -1235,7 +1349,12 @@ while True:
                 # Cycle SD Explorer highlight to simulate interaction
                 if sd_menu_items:
                     sd_menu_idx = (anim_tick // 15) % len(sd_menu_items)
-        
+            elif screen == 11:
+                # Synthesize a throughput wave for the meter sparkline
+                tp_hist.append(240 + int(180 * math.sin(anim_tick * 0.3)))
+                if len(tp_hist) > 100:
+                    tp_hist.pop(0)
+
         # ----------------- Confirm Baud Select -----------------
         if screen == 7 and baud_confirm_pending and time.ticks_diff(now_ms, baud_confirm_t) > 0:
             baud_confirm_pending = False
@@ -1430,6 +1549,7 @@ while True:
                         log_uart_data(data)
                         last_activity_t = time.ticks_ms()
                         last_type = "RX"
+                        feed_watch(data)      # freeze-frame + trigger scan + activity clock
                         for b in data:
                             add_to_terminal(b)
                             # Feed hex history
@@ -1443,6 +1563,30 @@ while True:
         if logging_active and time.ticks_diff(now_ms, last_bb_hb) > 60000:
             last_bb_hb = now_ms
             log_uart_data("\n--- BB %s rx=%d ---\n" % (log_stamp(), rx_bytes))
+
+        # --- Flight-recorder background monitors (always on, not just on their screen) ---
+        # Wedge detector: the target was alive, then went silent past the threshold. THE
+        # black-box event -- capture its dying words (the freeze-frame) and alert.
+        if (not wedge_active) and ever_active and time.ticks_diff(now_ms, last_rx_t) > WEDGE_SILENCE_MS:
+            wedge_active = True
+            wedge_since = log_stamp()
+            if logging_active:
+                try:
+                    ff = bytes(freeze_frame).decode("utf-8", "replace").replace("\n", " ")
+                    log_uart_data("\n--- WEDGE %s last=[%s] ---\n" % (wedge_since, ff[-80:]))
+                    flush_log_buffer()
+                except Exception:
+                    pass
+            fire_alert("WEDGE " + wedge_since[-8:], lo=500, hi=900)
+        # Throughput sampler: one bytes/sec sample per second feeds the meter sparkline.
+        if time.ticks_diff(now_ms, tp_last_t) >= 1000:
+            tp_last_t = now_ms
+            tp_hist.append(tp_accum)
+            if tp_accum > tp_peak:
+                tp_peak = tp_accum
+            tp_accum = 0
+            if len(tp_hist) > 100:
+                tp_hist.pop(0)
 
         # Periodic log flush check
         if logging_active and len(log_buffer) > 0 and time.ticks_diff(now_ms, last_log_write_t) > 500:
@@ -1851,6 +1995,40 @@ while True:
                         rem_t = max(0, time.ticks_diff(sd_confirm_t, time.ticks_ms()))
                         bar_w = int(128 * (rem_t / 2000))
                         oled.hline(0, 63, bar_w, 1)
+                oled.show()
+
+            elif screen == 10:
+                # SCREEN 10: WATCHDOG -- the flight-recorder status + the target's last words.
+                oled.fill(0)
+                draw_header(oled, "[ WATCHDOG ]", anim_tick, demo_mode, show_rec=True)
+                if wedge_active:
+                    blink = (anim_tick // 3) % 2 == 0
+                    oled.fill_rect(0, 11, 128, 9, 1 if blink else 0)
+                    text_small(oled, ("WEDGE @ " + wedge_since)[:21], 4, 12, 0 if blink else 1)
+                elif ever_active:
+                    sil = time.ticks_diff(time.ticks_ms(), last_rx_t) // 1000
+                    text_small(oled, "Target LIVE   idle %ds" % sil, 4, 12)
+                else:
+                    text_small(oled, "Target: waiting...", 4, 12)
+                text_small(oled, "watch %d terms  hits:%d" % (len(watch_terms), watch_hits), 4, 22)
+                if watch_last:
+                    text_small(oled, watch_last[:21], 4, 31)
+                oled.hline(0, 40, 128, 1)
+                text_small(oled, "freeze-frame (tap=ack)", 4, 42)
+                ff = bytes(freeze_frame).decode("utf-8", "replace").replace("\n", " ").replace("\r", " ")
+                text_small(oled, ff[-21:] if ff else "(nothing captured yet)", 4, 52)
+                oled.show()
+
+            elif screen == 11:
+                # SCREEN 11: THROUGHPUT -- a live bytes/sec sparkline + now/peak/total.
+                oled.fill(0)
+                draw_header(oled, "[ THROUGHPUT ]", anim_tick, demo_mode, show_rec=True)
+                cur = tp_hist[-1] if tp_hist else 0
+                text_small(oled, "now %s/s" % fmt_bytes(cur), 4, 12)
+                text_small(oled, "peak %s/s" % fmt_bytes(tp_peak), 66, 12)
+                text_small(oled, "total %sB" % fmt_bytes(rx_bytes + tx_bytes), 4, 22)
+                oled.rect(2, 31, 124, 30, 1)
+                draw_sparkline(oled, tp_hist[-60:] if tp_hist else [0], 5, 33, 118, 26, 1, baseline=True)
                 oled.show()
 
     except Exception as err:
