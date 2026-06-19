@@ -84,15 +84,33 @@ overlay silently had NO effect (picotool showed the stock GP12/13/14 pins). Fix:
 unmodified upstream probe_config.h `#include`s it and our copy wins for every TU. The picotool-info
 check is the guard that catches a wrong-board build.
 
-## GATE 2 — 2nd CDC: two nodes, DAP binds, JSON round-trip  ·  [ PASS / FAIL ]
-- Device class: `0xEF/0x02/0x01` (IAD)  CFG_TUD_CDC=2
-- [ ] exactly TWO `/dev/cu.usbmodem*` nodes
-- [ ] `probe-rs list`/`info` still succeed (DAP unaffected)
-- [ ] node map by NAME — CDC0=UART: ______  CDC1=Control: ______
-- [ ] mapping stable across 3 replug + 1 host reboot
-- [ ] `{"q":"status"}` 100/100 valid JSON
-- [ ] CDC0 carried live UART concurrently
-- Evidence: `gate2/`
+## GATE 2 — 2nd CDC: two nodes, DAP binds, JSON round-trip  ·  [ FIRMWARE FLASH-READY — VALIDATION PENDING BOOTSEL ]
+- Device class: `0xEF/0x02/0x01` (IAD composite)  CFG_TUD_CDC=2  ·  build commit: see git log
+- **Firmware — BUILT & statically verified (no hardware; can't enumerate while operator away):**
+  - [x] Builds clean (text 64340); `build/` rebuilt to the Gate-2 image — `nm` shows `tud_cdc_rx_cb`,
+        `strings` shows "Hackagotchi UART" + "Hackagotchi Control".
+  - [x] Descriptor decoded from the ELF: wTotalLength **164 == sum(bLength) 164**; **5 interfaces**
+        (0=DAP-vendor, 1/2=CDC0, 3/4=CDC1); **2 IADs** (firstItf 1 & 3); endpoints
+        {0x04,0x85,0x81,0x02,0x83,0x86,0x07,0x88} **no collisions**.
+  - [x] DAP integrity: vendor ITF0 + EP 0x04/0x85 byte-identical to upstream, appended-before the
+        CDCs, MS-OS-2.0/WinUSB still keyed on ITF0 → probe-rs will still bind. CFG_TUD_VENDOR=1.
+  - [x] Fixed a real 2-CDC bug: `cdc_uart.c` line-coding/line-state/send-break callbacks now itf-guard
+        to CDC0 (else opening/closing/setting-baud on CDC1 would reprogram/suspend the UART bridge).
+  - [x] CAP_BREAK runtime index rewritten to CDC0 (idx 62 = CDC0 ACM bmCapabilities; old relative
+        form would land in CDC1).
+  - [x] RP2040 DPSRAM budget sufficient (8 EPs ≈ 896 B of 3712 B); +4.2 KB .bss for the 2nd CDC FIFO.
+  - 4-lens adversarial workflow (wf_62d07ed1): SOURCE spec-correct; the only NEEDS_FIX was a stale
+    `build/` artifact (now rebuilt). Notes deferred to M1: CDC1 uses `strstr("status")` not jsmn
+    (fine — gate2_cdc.py sends one clean line); `tud_cdc_n_write` return unchecked (fine for ~50 B).
+- **Validation — PENDING (needs BOOTSEL flash on operator return):**
+  - [ ] exactly TWO `/dev/cu.usbmodem*` nodes
+  - [ ] `probe-rs list`/`info` still succeed (DAP unaffected)
+  - [ ] node map by NAME — CDC0=UART: ______  CDC1=Control: ______
+  - [ ] mapping stable across 3 replug + 1 host reboot
+  - [ ] `{"q":"status"}` 100/100 valid JSON (the reply already returns `heap` → re-records the
+        FreeRTOS watermark for the +4.2 KB .bss, closing the Gate-1 heap re-measure note)
+  - [ ] CDC0 carried live UART concurrently
+  - Evidence: `gate2/`
 
 ---
-**OVERALL:**  [ ] all 3 PASS → proceed to the UI port (M1+)   [ ] blocked at gate ____: ____________
+**OVERALL:**  Gate 0 ✅ PASS (5/5)  ·  Gate 1 ✅ PASS (core claim; robustness telemetry deferred to hardware return)  ·  Gate 2 🔨 firmware flash-ready + statically verified, two-node/JSON validation pending a BOOTSEL on operator return.  Proceed to M1 (UI port) only once Gate 2 validates on hardware.

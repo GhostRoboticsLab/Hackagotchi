@@ -38,15 +38,16 @@ set(ADVERSARIAL_STALL_MS 0 CACHE STRING "Gate-1 adversarial stall (ms) injected 
 option(ADVERSARIAL_AT_DAP_PRIO "Run the OLED stress task at DAP priority (adversarial contention test)" OFF)
 
 add_executable(hackagotchi_probe
-        # --- OUR overlay (shadows upstream main.c/probe_config.h; adds the OLED coexistence task) ---
-        ${CMAKE_CURRENT_LIST_DIR}/src/main.c
+        # --- OUR overlay (compiled instead of the matching upstream files; see each file's header) ---
+        ${CMAKE_CURRENT_LIST_DIR}/src/main.c                 # + OLED coexistence task (Gate 1)
         ${CMAKE_CURRENT_LIST_DIR}/src/hackagotchi_dashboard.c
         ${CMAKE_CURRENT_LIST_DIR}/src/ssd1306/ssd1306.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/usb_descriptors.c      # Gate 2: 2nd CDC + IAD composite
+        ${CMAKE_CURRENT_LIST_DIR}/src/cdc_uart.c             # Gate 2: itf-guard the CDC class callbacks
+        ${CMAKE_CURRENT_LIST_DIR}/src/cdc1_control.c         # Gate 2: CDC1 JSON control handler
         # --- pristine upstream debugprobe sources ---
         ${UPSTREAM}/src/probe_config.c
-        ${UPSTREAM}/src/usb_descriptors.c
         ${UPSTREAM}/src/probe.c
-        ${UPSTREAM}/src/cdc_uart.c
         ${UPSTREAM}/src/get_serial.c
         ${UPSTREAM}/src/sw_dp_pio.c
         ${UPSTREAM}/src/tusb_edpt_handler.c
