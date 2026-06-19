@@ -148,6 +148,28 @@ back as `cmd ...` lines on the telemetry stream (visible in the Sniffer screen):
 Send them either from the host (`echo -n n > /dev/cu.usbmodem21201`) or straight from the
 bridge by loading them as **macros** (Screen 6): `{"cfg": {"macros": ["n", "p", "r", "g", "d"]}}`.
 
+### Host-side telemetry tools (in the PicoInky repo's `tools/`)
+
+Two Mac-side helpers turn the raw tap stream into something you can actually read. Run them
+with the project venv (they need `pyserial`):
+
+```bash
+# Flash the Pico, then live-watch its DECODED boot/telemetry through the tap.
+# Auto-detects which port is the XIAO bridge (by its marker traffic) and which is the target.
+.venv/bin/python tools/flash_and_watch.py                 # detect → deploy → watch
+.venv/bin/python tools/flash_and_watch.py --no-flash      # just watch the tap
+.venv/bin/python tools/flash_and_watch.py --no-flash --reboot   # reboot via tap, then watch
+
+# The decoder on its own: live (port/stdin/--tail) or a post-mortem of a black-box log.
+.venv/bin/python tools/markerdecode.py --port /dev/cu.usbmodem21201   # live, colourised
+.venv/bin/python tools/markerdecode.py /sd/log_007.txt               # post-mortem summary
+```
+
+`markerdecode.py` understands the `dbg.log` grammar (`<ms> <body>`): it pairs each `uc>` e-ink
+refresh with its `uc<` (an unmatched one before a reboot = the canonical standalone wedge),
+tracks the `free=` RAM floor, and flags `FATAL` / `BUSY-TIMEOUT` / `EXC` / `ENOMEM`. Point it at
+a `log_NNN.txt` off this bridge's SD card and it prints "where did it die and why" in one shot.
+
 ---
 
 ## 🎬 Technical Demo Mode
