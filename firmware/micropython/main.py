@@ -294,6 +294,7 @@ rx_bytes = 0
 logging_active = False
 log_buffer = bytearray()
 last_log_write_t = 0
+last_bb_hb = 0              # black-box heartbeat timer (stamps the log every 60s)
 current_log_filename = "uart_log.txt"
 
 def get_next_log_filename():
@@ -348,6 +349,67 @@ def flush_log_buffer():
         logging_active = False
         log_buffer = bytearray()
         beep(1000, 200)
+
+
+# ----------------- RTC (PCF8563, expansion-board I2C @ 0x51) -----------------
+# Battery-backed by a CR1220 coin cell, so wall-clock survives power loss. The black
+# box stamps its session header + heartbeats with real time when the RTC reads valid;
+# with no (or a dead) backup cell the VL flag is set and we fall back to uptime -- the
+# log is still useful, just relative instead of absolute.
+RTC_ADDR = 0x51
+
+
+def _bcd(v):
+    return (v >> 4) * 10 + (v & 0x0F)
+
+
+def read_rtc():
+    # (Y, mon, d, hh, mm, ss) or None if the RTC is absent or its time is untrusted.
+    try:
+        d = i2c.readfrom_mem(RTC_ADDR, 0x02, 7)   # sec,min,hr,day,wday,mon,yr (BCD)
+        if d[0] & 0x80:                            # VL: integrity lost since last set
+            return None
+        return (2000 + _bcd(d[6]), _bcd(d[5] & 0x1f), _bcd(d[3] & 0x3f),
+                _bcd(d[2] & 0x3f), _bcd(d[1] & 0x7f), _bcd(d[0] & 0x7f))
+    except Exception:
+        return None
+
+
+def log_stamp():
+    rtc = read_rtc()
+    if rtc:
+        return "%04d-%02d-%02d %02d:%02d:%02d" % rtc
+    return "+%ds (no RTC batt)" % (time.ticks_diff(time.ticks_ms(), boot_ms) // 1000)
+
+
+def start_logging():
+    # Open a fresh session file + write a timestamped header. Returns False if the SD
+    # won't mount (caller can buzz an error). The single entry point for every start --
+    # boot auto-start, the Screen-9 menu, and the host {"cfg":{"logging":true}} path.
+    global logging_active, log_buffer
+    if not mount_sd():
+        return False
+    get_next_log_filename()
+    log_buffer.extend(("\n=== BLACK BOX %s | start %s | baud %d ===\n"
+                       % (current_log_filename, log_stamp(), BAUDRATE)).encode())
+    logging_active = True
+    flush_log_buffer()      # persist the header at once, so a yanked card still has it
+    return True
+
+
+def stop_logging():
+    global logging_active
+    flush_log_buffer()
+    logging_active = False
+
+
+# Autonomous black box: optionally begin recording at power-on, so an untethered or
+# overnight capture runs with nobody around to press START. Enable with
+# {"cfg":{"log_on_boot":true}}; default off so we don't fill the card every boot.
+if bridge_cfg.get("log_on_boot", False):
+    if start_logging():
+        print("Black box: auto-logging to", current_log_filename)
+
 
 def draw_rec_indicator(oled, anim_tick):
     if logging_active and (anim_tick // 4) % 2 == 0:
@@ -889,14 +951,17 @@ def process_host_command(line):
                 bridge_cfg["demo_on_boot"] = bool(cfg["demo_on_boot"])
                 changed = True
 
+            # 4b. Black-box auto-start on boot
+            if "log_on_boot" in cfg:
+                bridge_cfg["log_on_boot"] = bool(cfg["log_on_boot"])
+                changed = True
+
             # 5. Toggle UART Logging
             if "logging" in cfg:
-                logging_active = bool(cfg["logging"])
-                if logging_active:
-                    mount_sd()
-                    get_next_log_filename()
+                if bool(cfg["logging"]):
+                    start_logging()
                 else:
-                    flush_log_buffer()
+                    stop_logging()
                 changed = True
             
             if changed:
@@ -907,7 +972,7 @@ def process_host_command(line):
                 beep(3000, 40)
                 
                 # Print response back to host
-                res = {"status": "OK", "baud": BAUDRATE, "macros": bridge_cfg["macros"], "demo": demo_mode, "demo_on_boot": bridge_cfg.get("demo_on_boot", False), "logging": logging_active}
+                res = {"status": "OK", "baud": BAUDRATE, "macros": bridge_cfg["macros"], "demo": demo_mode, "demo_on_boot": bridge_cfg.get("demo_on_boot", False), "logging": logging_active, "log_on_boot": bridge_cfg.get("log_on_boot", False), "log_file": current_log_filename}
                 print("\r\n" + json.dumps(res) + "\r\n")
                 
                 # Reset local visual selectors
@@ -1165,15 +1230,15 @@ try:
                 prepare_sd_explorer()
                 beep(2000, 30)
             elif item_text == "[START LOGGING]":
-                logging_active = True
-                get_next_log_filename()
-                beep(2400, 30)
-                time.sleep_ms(50)
-                beep(2800, 30)
+                if start_logging():
+                    beep(2400, 30)
+                    time.sleep_ms(50)
+                    beep(2800, 30)
+                else:
+                    beep(800, 120)      # SD mount failed
                 prepare_sd_explorer()
             elif item_text == "[STOP LOGGING]":
-                flush_log_buffer()
-                logging_active = False
+                stop_logging()
                 beep(1200, 80)
                 prepare_sd_explorer()
             else:
@@ -1236,6 +1301,12 @@ try:
                                 hex_history.pop(0)
                         set_leds(False, True, False)
         
+        # Black-box heartbeat: stamp the log every 60s while recording, so that even if
+        # the Pico goes silent (a wedge) the last marker bounds when it died.
+        if logging_active and time.ticks_diff(now_ms, last_bb_hb) > 60000:
+            last_bb_hb = now_ms
+            log_uart_data("\n--- BB %s rx=%d ---\n" % (log_stamp(), rx_bytes))
+
         # Periodic log flush check
         if logging_active and len(log_buffer) > 0 and time.ticks_diff(now_ms, last_log_write_t) > 500:
             flush_log_buffer()
