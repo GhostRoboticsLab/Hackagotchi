@@ -8,9 +8,11 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
 - [x] **Gate 0 (fixtures):** `blink_a.elf` (250ms) + `blink_b.elf` (80ms) built & on disk
   (`fixtures/`, gitignored) via pinned Arm GCC 13.3.Rel1 + existing pico-sdk — NOT system GCC 16.1.
   Full download+verify is ready. *(2026-06-19)*
-- [ ] **Gate 0 (finish):** wire SWCLK/SWDIO/GND to the Pico Inky target; run
-  `firmware/c/tests/gates/gate0_check.sh` to completion (info/erase/download --verify/reset +
-  openocd cross-check); 5/5 clean. *(blocked on soldering the target's 3-pin SWD header)*
+- [x] **Gate 0 (finish): PASS — 5/5 clean** *(2026-06-19)*. Fresh Pico W target (RP2040 rev B2),
+  SWCLK=GP2/SWDIO=GP3/GND. info reads DPIDR 0x0bc12477; full 2MB mass-erase via openocd ~7.7s;
+  probe-rs `download --verify` + openocd `verify_image` (6596 B) both confirm. See
+  `firmware/c/tests/gates/GATE_RESULTS.md`. **Finding F0-1:** `probe-rs erase` is pathologically slow
+  on RP2040 (>150s, doesn't use bootrom block-erase) — gate + our recovery flows use openocd/bootrom.
 - [ ] **Gate 1:** build the fork (debugprobe v2.2.3) + remap SWD off the SD bus + one low-prio
   core-0 OLED task; `gate1_soak.sh` + `gate1_soak_openocd.sh` (≥1000 cycles, 0 fails/stalls +
   adversarial 50 ms variant); record heap watermark → **decide heap_4 vs heap_1**; **lock the SWD
