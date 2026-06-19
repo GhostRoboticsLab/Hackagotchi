@@ -5,6 +5,9 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
 ## Now — the 3 gates (gates-first; no OLED port until all pass)
 - [x] **Gate 0 (probe half):** bare XIAO flashed with stock `debugprobe_on_pico.uf2` (v2.2.3),
   enumerates as CMSIS-DAP (probe-rs sees it). *(2026-06-19)*
+- [x] **Gate 0 (fixtures):** `blink_a.elf` (250ms) + `blink_b.elf` (80ms) built & on disk
+  (`fixtures/`, gitignored) via pinned Arm GCC 13.3.Rel1 + existing pico-sdk — NOT system GCC 16.1.
+  Full download+verify is ready. *(2026-06-19)*
 - [ ] **Gate 0 (finish):** wire SWCLK/SWDIO/GND to the Pico Inky target; run
   `firmware/c/tests/gates/gate0_check.sh` to completion (info/erase/download --verify/reset +
   openocd cross-check); 5/5 clean. *(blocked on soldering the target's 3-pin SWD header)*
