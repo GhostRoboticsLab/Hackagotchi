@@ -100,12 +100,17 @@ Connect the bridge to your target microcontroller (e.g. Raspberry Pi Pico W):
 You can configure and **drive** the bridge on-the-fly from your host machine over USB. Any JSON line (`{...}`) is intercepted as a host command; anything else falls through to the target unchanged. `{"cfg": ...}` is saved persistently to `bridge_cfg.json`; two non-persistent commands let a companion app/script control and monitor the bridge over the same port — the cheapest fix for the single-button UX:
 
 - **Jump to any screen** — `{"screen": 4}` (0…11) switches the bridge screen and replies `{"status":"OK","screen":4}`. So you don't have to long-press through every tool to reach one.
-- **Query status** — `{"q":"status"}` replies with a one-line snapshot (no state change): `screen`, `baud`, `tx`/`rx` byte counts, `logging`, `log_file`, `sd`, throughput `tp_peak`, `demo`. Lets a host script watch the recorder without reading the OLED.
+- **Query status** — `{"q":"status"}` replies with a one-line snapshot (no state change): `screen`, `baud`, `tx`/`rx` byte counts, `logging`, `log_file`, `sd`, throughput `tp_peak`, `wedge`, trigger `hits`, `demo`. Lets a host script watch the recorder without reading the OLED.
+- **Pull the freeze-frame** — `{"q":"freeze"}` returns the flight-recorder's last ~96 bytes from the target (its "dying words" before a wedge) as `hex` + printable `ascii`, plus the `wedge` flag/`since` stamp. Retrieve a wedge post-mortem over USB — no OLED, no yanking the microSD.
+- **Reset stats** — `{"clear":true}` zeroes the tx/rx/throughput counters + trigger hits and drops the freeze-frame (mirrors the on-device short-press), for clean scripted captures.
 
 ```bash
 echo '{"screen": 3}'    > /dev/cu.usbmodem21201   # jump to the Oscilloscope screen
-echo '{"q":"status"}'   > /dev/cu.usbmodem21201   # -> {"status":"OK","screen":3,"rx":...,"sd":true,...}
+echo '{"q":"status"}'   > /dev/cu.usbmodem21201   # -> {"status":"OK","screen":3,"rx":...,"wedge":false,...}
+echo '{"q":"freeze"}'   > /dev/cu.usbmodem21201   # -> {"status":"OK","n":96,"hex":"...","ascii":"..."}
 ```
+
+Host-command lines (`{...}`) are intercepted whole and are **not** forwarded to the target — they won't leak bytes onto its RX line.
 
 #### Examples:
 1.  **Configure Custom Macros**:
