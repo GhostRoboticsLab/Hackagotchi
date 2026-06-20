@@ -54,8 +54,8 @@ volatile bool timed_break;
 static volatile uint32_t cdc_tx_oe = 0;
 uint32_t cdc_uart_tx_overflow(void) { return cdc_tx_oe; }
 
-static uint8_t tx_buf[32];      /* host->target: max 1 FIFO worth (TX path unchanged) */
-static uint8_t rx_buf[64];      /* target->host: drained from the SPSC ring, not the HW FIFO */
+static uint8_t rx_buf[64];      /* target->host: drained from the SPSC ring, not the HW FIFO.
+                                 * host->target is now byte-at-a-time (non-blocking), no tx_buf. */
 // Actually s^-1 so 25ms
 #define DEBOUNCE_MS 40
 static uint debounce_ticks = 5;
@@ -149,18 +149,21 @@ bool cdc_task(void)
 #endif
         }
 
-      /* Reading from a firehose and writing to a FIFO. */
-      size_t watermark = MIN(tud_cdc_available(), sizeof(tx_buf));
-      if (watermark > 0) {
-        size_t tx_len;
+      /* [HACKAGOTCHI] Host -> target, NON-BLOCKING. Upstream used uart_write_blocking(), which
+       * busy-waits the highest-priority bridge task (prio +3, above DAP) until the bytes drain into
+       * the TX FIFO — up to ~133 ms at 1200 baud, delaying DAP/TUD. Instead push only what the TX FIFO
+       * can take right now and leave the rest in the CDC FIFO; USB then back-pressures the host. No
+       * spin, no loss. (uart_putc_raw can't be used unguarded — it blocks on a full FIFO.) */
+      if (tud_cdc_available() && uart_is_writable(PROBE_UART_INTERFACE)) {
 #ifdef PROBE_UART_TX_LED
         gpio_put(PROBE_UART_TX_LED, 1);
         tx_led_debounce = debounce_ticks;
 #endif
-        /* Batch up to half a FIFO of data - don't clog up on RX */
-        watermark = MIN(watermark, 16);
-        tx_len = tud_cdc_read(tx_buf, watermark);
-        uart_write_blocking(PROBE_UART_INTERFACE, tx_buf, tx_len);
+        while (uart_is_writable(PROBE_UART_INTERFACE) && tud_cdc_available()) {
+          uint8_t ch;
+          if (tud_cdc_read(&ch, 1) != 1) break;
+          uart_get_hw(PROBE_UART_INTERFACE)->dr = ch;  // FIFO has space (guarded) -> non-blocking
+        }
       } else {
 #ifdef PROBE_UART_TX_LED
           if (tx_led_debounce)

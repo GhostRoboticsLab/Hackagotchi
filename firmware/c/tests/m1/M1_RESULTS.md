@@ -195,9 +195,58 @@ the ring fills then drops-newest (counted); an M2 recorder draining to SD change
 **Verdict: PASS** — target-UART capture is now interrupt-driven + bounded, proven end-to-end at
 rank-1 with a host-tested ring underneath.
 
-### Remaining in M1 (next increments)
-- per-interface USB string descriptors (stable CDC0=UART / CDC1=Control naming).
-- error-code + goto-cleanup idiom adopted for new code.
-- Watchdog hardening: characterise DAP/UART/DASH cadence under flash load, then monitor them + flip
-  the watchdog to armed-by-default.
-- (Lower priority) non-blocking host→target TX; high-baud burst-loss A/B with a fast UART source.
+---
+
+## Increment 5 — closeout: USB strings, non-blocking TX, watchdog arm-by-default — **PASS (live, 2026-06-20)**
+
+**(a) Per-interface USB string descriptors — already in place (Gate-2), verified.** CDC0 `iInterface`=6
+"Hackagotchi UART", CDC1 `iInterface`=7 "Hackagotchi Control" (`usb_descriptors.c:134,136,169-170`),
+confirmed in the artifact. Caveat: macOS derives the `/dev/cu.usbmodem` suffix from serial+interface
+number, NOT `iInterface`, so the node name is unchanged on macOS (Linux/Windows surface the names);
+role is still reliably determined by behaviour (CDC1 answers `status`).
+
+**(b) Non-blocking host→target TX.** Replaced `uart_write_blocking` (busy-waited the +3 bridge task up
+to ~133 ms at 1200 baud, above DAP) with push-only-what-the-TX-FIFO-takes; the rest stays in the CDC
+FIFO (USB back-pressures the host). Artifact: **0 `uart_write_blocking` refs in `cdc_task`**. The
+loopback HIL (which drives host→CDC0→TX) still round-trips byte-identical.
+
+**(c) Watchdog armed by default + soak-proven.** `s_armed` defaults true. Safe because it monitors TUD
+(prio +2): DAP (prio +1) is below it, so flash load can never starve TUD; TUD goes silent only on a
+true wedge. Proven **both directions**:
+- FIRES on a real wedge — `watchdog_hil.py` (wd_test wedges TUD → `kind=watchdog/task=TUD` → reboot).
+- Does NOT false-fire under load — `watchdog_soak.py`: 25 target flashes over DAP, `up` 114→175
+  monotonic, `crashes` steady at 7, `wd_armed` held 1. This is the "characterise under flash load" proof.
+
+**(d) Error-code + goto-cleanup idiom** — codified as the project convention in
+`docs/firmware-conventions.md` (M1 modules are single-resource/early-return; the full idiom earns its
+keep at M2's FatFs). The same doc captures the other M1 reliability rules (no-blocking-above-DAP,
+bounded+counted buffers, static-not-stack-in-callbacks per F1-4, self-attestation, overlay discipline).
+
+**Verdict: PASS.**
+
+---
+
+## OVERALL — M1 (Probe + bridge + control core): **COMPLETE / PASS** (2026-06-20)
+
+All M1 deliverables done and HIL-verified on hardware:
+
+| Deliverable | Increment | Proof |
+|---|---|---|
+| Fault handler + crash box; stack/malloc hooks | 1 | `crashbox_hil.py` (capture survives reboot) |
+| SW-watchdog (+ armed-by-default) | 2, 5 | `watchdog_hil.py` (fires) + `watchdog_soak.py` (no false-fire) |
+| jsmn CDC1 control (status/next/prev/dump) | 3 | `jsmn_hil.py` (structured dispatch, strstr-traps rejected) |
+| Bounded SPSC UART bridge + non-blocking TX | 4, 5 | `ring_test.c` (host) + `uart_bridge_hil.py` (loopback) |
+| Per-interface USB string descriptors | 5 (Gate-2) | artifact-decoded |
+| error-code + goto-cleanup idiom | 5 | `docs/firmware-conventions.md` |
+
+**Findings recorded:** F1-1..F1-3 (gates), **F1-4** (JSON parser locals overflow the small TUD task
+stack → ENXIO; fix = static buffers + bigger stack).
+
+**Disclosed deferrals (carried to M2+, not blockers):** high-baud burst-loss A/B not run (no fast UART
+source on the bench; the IRQ architecture prevents it by construction); DAP/UART/DASH not individually
+watchdog-monitored (TUD-keystone is the correct signal — DASH is starvable by design, UART is
+suspendable, DAP is upstream; per-DAP-progress monitoring is a possible M2 refinement); the soak left
+the target Pico W holding `blink_a.elf` (it's the test mule / M2 SWD target — restore PicoInky if a
+dashboard mule is wanted).
+
+**Cleared to start M2** (SD + black-box logging — the recorder drains the same `spsc_ring`).

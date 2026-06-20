@@ -72,19 +72,15 @@ def main():
     if field_int(status, "wd_armed") is None:
         print("FAIL: status has no 'wd_armed' field — wrong/old firmware")
         return 1
-    if field_int(status, "wd_armed") != 0:
-        print("FAIL: watchdog should be DISARMED at boot (safety) but wd_armed != 0")
+    if field_int(status, "wd_armed") != 1:
+        print("FAIL: watchdog should be ARMED by default at boot but wd_armed != 1")
         return 1
+    print("[boot] confirmed wd_armed=1 (armed by default)")
     crashes0 = field_int(status, "crashes")
 
-    # arm enforcement
+    # wd_arm is idempotent (already armed); confirm it still reports armed
     armed = query(port, '{"q":"wd_arm"}\n')
     print(f"[arm] reply: {armed}")
-    status_armed = query(port, '{"q":"status"}\n')
-    if field_int(status_armed, "wd_armed") != 1:
-        print(f"FAIL: watchdog did not report armed after wd_arm ({status_armed})")
-        return 1
-    print(f"[arm] confirmed wd_armed=1")
 
     # wedge the TUD task -> the armed watchdog must catch it and reboot
     print('\n[wedge] sending {"q":"wd_test"} -> TUD task wedges; watchdog should reboot in ~4-8s ...')
@@ -112,8 +108,8 @@ def main():
     if crashes0 is None or crashes1 is None or crashes1 != crashes0 + 1:
         print(f"FAIL: crash count did not advance by 1 ({crashes0} -> {crashes1})")
         ok = False
-    if field_int(status2, "wd_armed") != 0:
-        print("FAIL: watchdog should be disarmed again after the reboot")
+    if field_int(status2, "wd_armed") != 1:
+        print("FAIL: watchdog should be armed by default again after the reboot")
         ok = False
 
     if ok:
