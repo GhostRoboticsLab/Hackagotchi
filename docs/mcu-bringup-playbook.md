@@ -105,6 +105,20 @@ A gate is meaningless if you're testing the stock firmware by accident. Establis
   (`nm … | grep tud_cdc_rx_cb`), a string only your build has (`strings … | grep 'Hackagotchi Control'`).
 - **Tee the provenance into the log.** The soak scripts run `probe-rs info` (reads the remapped pins) as
   a banner at the top of every log, so the evidence is inseparable from the result.
+- **The byte-identical-builds trap (learned 2026-06-20).** When two builds differ ONLY in behaviour that
+  nothing captured records — e.g. a stock build vs an adversarial variant that just changes a task priority
+  and adds a `busy_wait` — the product string + pins are *identical*, so a soak of the wrong build produces
+  byte-for-byte identical evidence. A re-run `embedded-verifier` workflow caught exactly this here and
+  returned DO-NOT-PASS: nothing bound the adversarial image to the 1000-cycle soak. Two fixes, best first:
+  - **Firmware self-attestation (best).** Have the firmware report *its own build-id* plus a measurement
+    proving the stressor fired, over a channel you already poll. Here the CDC1 status reply gained
+    `prio` (1 ⇒ task at DAP priority), a *measured* `stall_us` (≈50000 ⇒ the 50 ms `busy_wait` actually ran;
+    the +0..49 µs overage was DAP time-slicing it — contention you can *see*), and a monotonic loop counter
+    `n`. Now the run self-proves which image ran AND that the dashboard task kept looping — rank-1, no extra
+    wiring. This is strictly better than the loopback jumper it replaced.
+  - **`picotool verify` retroactively.** When you can't rebuild: `picotool verify <the-exact-uf2>` against
+    the untouched post-soak flash binds the image at rank-2 — and run a CONTROL verify against the *wrong*
+    image (it must report "contents did not match") to prove the check discriminates, not a vacuous always-OK.
 
 ---
 
@@ -197,7 +211,12 @@ When you can't physically touch the hardware (operator away, no BOOTSEL/replug p
   Re-verify the assumption against the actual base.
 - **A counter latched at boot proves nothing.** "The soak ran 1000 times" doesn't prove the OLED task
   kept looping — NAKs are swallowed, an `ok` flag set once stays set. Capture a *monotonic* counter from
-  the device (loopback → CDC) to prove liveness; eyeball is rank 5.
+  the device (loopback → CDC, or the firmware's own status reply) to prove liveness; eyeball is rank 5.
+- **System-alive ≠ task-alive (frozen-but-alive).** A free-running uptime, or a status reply serviced by a
+  *higher-priority* task, keeps answering even if your task-under-test froze in a loop. On 2026-06-20 the
+  CDC1 `up`/`heap` liveness was serviced by the TUD task (above the dashboard) — so it could not have caught
+  a hung dashboard. The fix: report a counter incremented BY the task under test (the dashboard's loop `n`)
+  and assert *it* advanced (307→2189, 0 frozen) — that is the rank-1 task-liveness signal, not "device answers."
 - **Heap free == min from a no-alloc harness is not headroom.** If the test does zero runtime allocation,
   `free == min` is expected and tells you nothing about the real workload. Re-measure when the actual
   feature mallocs; instrument the right allocator (the SSD1306 framebuffer is C-lib malloc, invisible to
