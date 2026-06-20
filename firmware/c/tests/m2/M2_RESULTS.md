@@ -57,6 +57,37 @@ crash box hardfault+mallocfail on the 44 KB heap, watchdog wedge); SD re-mounts 
 **Verdict: PASS** — the SD hardware works as the plan claimed, FatFs integrates into the overlay build,
 and the foundational persistence layer is proven at rank-1.
 
+---
+
+## Increment 2 — recorder core (host-tested) — **PASS (host, 2026-06-20)**
+
+**Falsifiable claim.** The black-box recorder state machine — ported from `firmware/micropython/main.py`
+— is correct: session-numbered filenames, buffered flush, the **visible-stop-on-fault** invariant, the
+strict-boundary wedge detector + 96-byte freeze ring, the trigger-term scan, heartbeat, throughput —
+all proven on the HOST with mocked hardware (no Pico, no SD, no RTC), time injected so every boundary
+is exercised deterministically.
+
+**Implementation** (`src/recorder.{c,h}`): pure logic behind an injected `recorder_hw_t` vtable
+(`sd_mounted`/`sd_max_log_index`/`sd_open_append`/`sd_write`/`sd_close`/`sd_last_fault_full`/`rtc_read`/
+`alert`). Producer/consumer split (the research's key deviation from the `.py`): `recorder_note_rx()` is
+the cheap hot-path liveness stamp; `recorder_feed()` does the per-byte scan + freeze + buffering off the
+hot path; `recorder_tick()` is the periodic driver. So a backlogged low-prio consumer can't manufacture
+a false wedge (`last_rx` is stamped by the producer). NOT yet wired into the firmware build — that's
+increment 3 (it's pure C + host-verified; adding it unused would only cost `copy_to_ram` RAM).
+
+**Machine assertion** (`tests/m2/recorder_test.c`, can fail): in-memory mocks for the vtable, NDEBUG-proof
+`CHECK` macro, a `REC_SELFTEST_BREAK` verify-the-verifier build, and the A–J cases.
+
+**Result (host).** `cc -I src ... recorder_test.c recorder.c` → **31 checks, 0 failed**; broken build
+exits 1. Cases proven: empty→`log_001.txt`, idx 7→`log_008.txt`, unmounted→start returns false; header
+content + immediate flush + uptime stamp; <64 buffered / 500 ms idle-flush / 64-threshold flush; SD-full
+vs write-error classification with logging stopping VISIBLY (never silently) + alert; wedge fires at
+8001 ms not 8000 (strict `>`), exactly once while silent, clears + RECOVERED on resume; trigger
+first-match-break (two terms one line → one hit) + 300 B flood guard; the WEDGE line carries the last 80
+freeze bytes; heartbeat at >60 s with rx count; throughput peak; RTC-trusted wall-clock stamp.
+
+**Verdict: PASS** — the recorder logic is rank-1 host-verified; only the hardware wiring remains.
+
 ### Remaining in M2
 - Recorder core (`recorder.c` behind a `recorder_hw_t` vtable) + host unit tests (session naming,
   flush, visible-stop, wedge state machine, freeze ring, heartbeat) — pure logic, like `ring_test.c`.

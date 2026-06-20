@@ -62,7 +62,9 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     setup.sh) on SPI0 GP2/3/4/CS28, low-prio SD task; `{"q":"sd"}` → mount+write+readback OK on a real
     16 GB FAT32 card; DAP binds, M1 regression green. Heap trimmed 64→44 KB (FreeRTOSConfig overlay) to
     fit FatFs under copy_to_ram. RTC confirmed PCF8563 (not PCF85063A).
-  - [ ] recorder core (recorder.c + host unit tests: naming/flush/visible-stop/wedge/freeze/heartbeat).
+  - [x] **recorder core** (`src/recorder.c` + `tests/m2/recorder_test.c`) — **PASS, host-tested** *(2026-06-20)*:
+    pure logic behind a `recorder_hw_t` vtable (naming/flush/visible-stop/wedge/triggers/freeze/heartbeat/
+    throughput/RTC), 31/31 host checks + verify-the-verifier. Not yet wired to the firmware (increment 3).
   - [ ] wire to HW: 2nd ring + cdc_task fan-out + low-prio recorder→SD; CDC1 status; SD-write-during-flash soak.
   - [ ] RTC timestamps (PCF8563 @0x51, i2c1 mutex'd with OLED). Consider FF_USE_LFN=0 for RAM headroom.
 - [ ] M3 core screens; M4 full UI parity; M5 polish + tagged release (.uf2 + .elf).
