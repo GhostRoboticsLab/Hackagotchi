@@ -199,3 +199,35 @@ needed (the soak proved it's unnecessary), no upstream files forked — `probe.c
 canonical committed build (`pico_set_binary_type default`) was reproduced (90.4 KB resident), reflashed,
 and smoke-tested on hardware. M3 starts with ~174 KB free SRAM. The FreeRTOS heap stays 34 KB (measured
 ~20 KB use) but can now be raised in M3 since SRAM is no longer the constraint.
+
+---
+
+## PCF8563 RTC — wall-clock log stamps — **DONE, HIL-verified (2026-06-20)**
+
+The recorder stamped log entries with the uptime fallback (`+Ns`) because `hw_rtc_read` was a stub.
+Implemented the PCF8563 (the Seeed XIAO-expansion RTC at I2C1 0x51) so stamps become real wall-clock
+when the clock is trusted.
+
+**Shared-bus discipline (the load-bearing part):** the OLED (0x3C, DASH task) and the RTC (0x51, SD/
+recorder task) sit on the SAME I2C1 (GP6/7) but are driven from DIFFERENT FreeRTOS tasks — a data race
+on the peripheral. New `src/i2c1_bus.{c,h}` owns the bus: idempotent bring-up + a FreeRTOS mutex, init'd
+once in `main()` before the scheduler so the mutex exists before any task locks. Every OLED burst
+(`ssd1306_show`/`_init`) and every RTC transaction now holds `i2c1_bus_lock()`.
+
+- **`src/rtc_pcf8563.{c,h}`** — BCD read/set of regs 0x02–0x08, VL (low-voltage) flag handling, per-
+  transfer I2C timeouts (a missing/stuck RTC can never hang the SD task), bus-mutexed. `read()` returns
+  false (→ uptime fallback) when absent / I2C error / VL set; `set()` writes the clock and clears VL.
+- **`hw_rtc_read`** (sd_gate.c) now calls the driver → the recorder's `stamp()` emits wall-clock.
+- **CDC1**: `{"q":"time"}` (read), `{"q":"settime","t":"YYYY-MM-DD HH:MM:SS"}` (set) — a generic
+  `get_str` jsmn key extractor was added alongside `get_q`.
+
+**HIL (`tests/m2/rtc_hil.py`, on the RTC build):**
+- `{"q":"time"}` → `{"rtc":1,"valid":0}` at boot (present at 0x51; VL set on a never-set clock).
+- `settime 2026-06-20 21:59:24` → `set:1`; readback `21:59:26` (valid=1, VL cleared, within 2 s).
+- after a 3 s wait → `21:59:30` (advanced ~4 s — actually ticking, not a static echo).
+- reboot (`{"q":"crash"}`) → the NEW session header reads
+  `=== BLACK BOX log_022.txt | start 2026-06-20 21:59:32 | baud 115200 ===` — **wall-clock, not `+0s`**.
+- RTC persisted across the reboot (kept ticking); dashboard self-attest `n` keeps advancing (140→152)
+  → the OLED task is NOT deadlocked by the shared-bus mutex.
+
+**Verdict: PASS** — real wall-clock timestamps in the black box, with the OLED↔RTC bus race closed.

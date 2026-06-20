@@ -69,6 +69,8 @@ add_executable(hackagotchi_probe
         ${CMAKE_CURRENT_LIST_DIR}/src/sd/sdio_stubs.c        # M2: stub the unused SDIO refs (SPI-only)
         ${CMAKE_CURRENT_LIST_DIR}/src/sd_gate.c              # M2: SD bring-up gate + recorder/SD task
         ${CMAKE_CURRENT_LIST_DIR}/src/recorder.c             # M2: black-box recorder core (host-tested)
+        ${CMAKE_CURRENT_LIST_DIR}/src/i2c1_bus.c             # M2.4: shared I2C1 bus + mutex (OLED + RTC)
+        ${CMAKE_CURRENT_LIST_DIR}/src/rtc_pcf8563.c          # M2.4: PCF8563 RTC for log wall-clock stamps
         # --- pristine upstream debugprobe sources ---
         ${UPSTREAM}/src/probe_config.c
         ${UPSTREAM}/src/probe.c

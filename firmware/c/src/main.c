@@ -59,6 +59,7 @@
 #include "crash_box.h"               // [HACKAGOTCHI] M1 reliability core — post-mortem fault box
 #include "watchdog_task.h"           // [HACKAGOTCHI] M1 reliability core — SW watchdog
 #include "sd_gate.h"                 // [HACKAGOTCHI] M2 — SD bring-up gate (low-prio SD/FatFs task)
+#include "i2c1_bus.h"                // [HACKAGOTCHI] M2 — shared I2C1 (OLED + PCF8563 RTC), bus mutex
 
 // UART0 for debugprobe debug
 // UART1 for debugprobe to target device
@@ -193,6 +194,10 @@ int main(void) {
     // record is also served on demand over CDC1 (`{"q":"lastfault"}`).
     if (crash_box_init())
         probe_info("LAST FAULT: %s\n", crash_box_report());
+
+    // [HACKAGOTCHI] M2: bring up the shared I2C1 bus + its mutex ONCE here, before any task runs, so the
+    // DASH (OLED) and SD (PCF8563 RTC) tasks can both lock it safely from the first tick.
+    i2c1_bus_init();
 
     if (THREADED) {
         xTaskCreate(usb_thread, "TUD", TUD_TASK_STACK, NULL, TUD_TASK_PRIO, &tud_taskhandle);

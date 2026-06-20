@@ -19,6 +19,7 @@
 #include "probe_config.h"  // PROBE_UART_BAUDRATE (header baud)
 #include "recorder.h"
 #include "uart_bridge.h"
+#include "rtc_pcf8563.h"   // M2.4: PCF8563 wall-clock for log stamps
 
 TaskHandle_t sd_gate_taskhandle;
 
@@ -95,7 +96,13 @@ static int hw_write(void *h, const void *buf, size_t n) {
 }
 static void hw_close(void *h) { f_close((FIL *)h); }            // close flushes -> durable per session-flush
 static bool hw_fault_full(void) { return s_log_fr == FR_DENIED; }  // FatFs "disk full"
-static bool hw_rtc_read(rec_time_t *t) { (void)t; return false; }  // M2.4: PCF8563; uptime fallback for now
+static bool hw_rtc_read(rec_time_t *t) {                            // PCF8563 wall-clock; false => uptime fallback
+    rtc_dt_t dt;
+    if (!rtc_pcf8563_read(&dt)) return false;                      // absent / I2C error / VL set (untrusted)
+    t->year = dt.year; t->mon = dt.mon; t->day = dt.day;
+    t->hour = dt.hour; t->min = dt.min; t->sec = dt.sec;
+    return true;
+}
 static void hw_alert(const char *text, int lo, int hi) {
     (void)lo; (void)hi;
     snprintf(s_alert, sizeof s_alert, "%s", text);

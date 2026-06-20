@@ -34,6 +34,7 @@
 #include "watchdog_task.h"          // wd_arm + g_tud_wedge (watchdog control + HIL test)
 #include "uart_bridge.h"            // uart ring stats + loopback toggle (CDC0 bridge HIL test)
 #include "sd_gate.h"                // M2: SD bring-up self-test result ({"q":"sd"})
+#include "rtc_pcf8563.h"            // M2.4: PCF8563 RTC read/set ({"q":"time"} / {"q":"settime"})
 
 // Build-discriminating tags compiled into the status reply so the RUNNING firmware proves its OWN
 // identity (closes the Gate-1 provenance gap). Mirror the CMake -D flags (PRIVATE on the target).
@@ -120,6 +121,21 @@ static bool get_q(const char *js, const jsmntok_t *tok, int ntok, char *out, siz
   return false;
 }
 
+// Copy the string value of top-level key `key` into out[]. Returns true iff found as a string value.
+static bool get_str(const char *js, const jsmntok_t *tok, int ntok,
+                    const char *key, char *out, size_t outsz) {
+  for (int i = 1; i + 1 < ntok; i++) {
+    if (tok_eq(js, &tok[i], key) && tok[i + 1].type == JSMN_STRING) {
+      int vlen = tok[i + 1].end - tok[i + 1].start;
+      if (vlen <= 0 || (size_t) vlen >= outsz) return false;
+      memcpy(out, js + tok[i + 1].start, (size_t) vlen);
+      out[vlen] = '\0';
+      return true;
+    }
+  }
+  return false;
+}
+
 // Parse + dispatch one complete JSON request line.
 static void handle_line(uint8_t itf, const char *line, int len) {
   jsmn_parser p;
@@ -155,6 +171,28 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   // Reliability HIL hook: exhaust the FreeRTOS heap so vApplicationMallocFailedHook fires -> crash box
   // records kind=mallocfail + reboots (directly proves the malloc-fail path, not just the shared code).
   if (!strcmp(q, "oom_test"))  { for (;;) (void) pvPortMalloc(1024); return; /* hook reboots first */ }
+  // M2.4: PCF8563 RTC (I2C1 @0x51, bus-mutexed with the OLED). {"q":"time"} reads;
+  // {"q":"settime","t":"YYYY-MM-DD HH:MM:SS"} sets the clock (clears the VL low-voltage flag).
+  if (!strcmp(q, "time")) {
+    rtc_dt_t dt; char r[64];
+    if (rtc_pcf8563_read(&dt))
+      snprintf(r, sizeof r, "{\"rtc\":1,\"valid\":1,\"t\":\"%04u-%02u-%02u %02u:%02u:%02u\"}\n",
+               (unsigned)dt.year, (unsigned)dt.mon, (unsigned)dt.day,
+               (unsigned)dt.hour, (unsigned)dt.min, (unsigned)dt.sec);
+    else
+      snprintf(r, sizeof r, "{\"rtc\":%d,\"valid\":0}\n", rtc_pcf8563_present() ? 1 : 0);
+    reply(itf, r); return;
+  }
+  if (!strcmp(q, "settime")) {
+    char ts[24];
+    if (!get_str(line, tok, n, "t", ts, sizeof ts)) { reply(itf, "{\"err\":\"not\"}\n"); return; }
+    unsigned y, mo, d, h, mi, s;
+    if (sscanf(ts, "%u-%u-%u %u:%u:%u", &y, &mo, &d, &h, &mi, &s) != 6) {
+      reply(itf, "{\"err\":\"badtime\"}\n"); return;
+    }
+    rtc_dt_t dt = { (uint16_t)y, (uint8_t)mo, (uint8_t)d, (uint8_t)h, (uint8_t)mi, (uint8_t)s };
+    char r[24]; snprintf(r, sizeof r, "{\"set\":%d}\n", rtc_pcf8563_set(&dt) ? 1 : 0); reply(itf, r); return;
+  }
 
   reply(itf, "{\"err\":\"unknown\"}\n");
 }

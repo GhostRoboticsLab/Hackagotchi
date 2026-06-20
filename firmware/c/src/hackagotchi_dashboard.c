@@ -29,6 +29,7 @@
 #include "task.h"
 
 #include "ssd1306.h"
+#include "i2c1_bus.h"   // [HACKAGOTCHI] M2: shared I2C1 + bus mutex (OLED shares GP6/7 with the RTC)
 #include "hackagotchi_dashboard.h"
 
 #ifndef DASH_I2C_ADDR
@@ -56,12 +57,10 @@ volatile uint32_t g_dash_stall_us = 0;
 void dashboard_task(void *ptr) {
     (void)ptr;
 
-    // Bring up I2C1 on GP6/GP7. These pins are independent of SWD (GP26/27) and the SD bus.
-    i2c_init(DASH_I2C_INST, DASH_I2C_HZ);
-    gpio_set_function(DASH_I2C_SDA, GPIO_FUNC_I2C);
-    gpio_set_function(DASH_I2C_SCL, GPIO_FUNC_I2C);
-    gpio_pull_up(DASH_I2C_SDA);
-    gpio_pull_up(DASH_I2C_SCL);
+    // Bring up the shared I2C1 bus (GP6/GP7, independent of SWD GP26/27 and the SD bus). Idempotent —
+    // main() already did this before the scheduler started; this is belt-and-braces. The RTC (0x51)
+    // shares this bus from the SD task, so every OLED transaction below holds i2c1_bus_lock().
+    i2c1_bus_init();
 
     // The SSD1306 framebuffer is malloc()'d from the C-lib heap, NOT the FreeRTOS heap — so the
     // xPortGet*HeapSize() numbers below cleanly reflect task/RTOS allocations (the heap_4/heap_1
@@ -71,7 +70,8 @@ void dashboard_task(void *ptr) {
     // The expansion OLED runs off the internal charge pump, so false => init sends 0x8D,0x14 (pump
     // ON). A garbage stack value here sends 0x8D,0x10 (pump OFF) => no boost voltage => DARK panel.
     disp.external_vcc = false;
-    bool ok = ssd1306_init(&disp, 128, 64, DASH_I2C_ADDR, DASH_I2C_INST);
+    bool ok = false;
+    if (i2c1_bus_lock(200)) { ok = ssd1306_init(&disp, 128, 64, DASH_I2C_ADDR, DASH_I2C_INST); i2c1_bus_unlock(); }
 
     uint32_t counter = 0;
     char l0[22], l1[22], l2[22], l3[22];
@@ -98,12 +98,14 @@ void dashboard_task(void *ptr) {
             snprintf(l1, sizeof l1, "OLED+DAP n=%lu", (unsigned long)counter);
             snprintf(l2, sizeof l2, "heap free %u", freeh);
             snprintf(l3, sizeof l3, "heap min  %u", minh);
-            ssd1306_clear(&disp);
+            ssd1306_clear(&disp);                     // framebuffer-only ops — no bus lock needed
             ssd1306_draw_string(&disp, 0, 0, 1, l0);
             ssd1306_draw_string(&disp, 0, 16, 1, l1);
             ssd1306_draw_string(&disp, 0, 32, 1, l2);
             ssd1306_draw_string(&disp, 0, 48, 1, l3);
-            ssd1306_show(&disp);  // ~23 ms blocking I2C burst — the hot-path-coexistence stress
+            // ~23 ms blocking I2C burst — the hot-path-coexistence stress. Hold the bus mutex so an RTC
+            // read from the SD task can't interleave on GP6/7. Skip the frame if the bus is busy.
+            if (i2c1_bus_lock(200)) { ssd1306_show(&disp); i2c1_bus_unlock(); }
         }
 
         // [HACKAGOTCHI] M2: the Gate-1 heap series was printf'd to GP0 TX (uart0 stdio). GP0 is now the

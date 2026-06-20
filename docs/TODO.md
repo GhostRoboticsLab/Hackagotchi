@@ -78,8 +78,18 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     **Free SRAM 35 → 174 KB (+139 KB)** for M3. Full re-gate green: probe-rs 1000/1000 + openocd 200/200
     (0/0), throughput +2.6 % (noise), crash box (PC now in flash 0x10xx) + watchdog HIL pass, M2 SD intact.
     See `tests/m2/M2_RESULTS.md` "copy_to_ram → XIP".
-  - [ ] **SD-write-during-flash coexistence soak** (heavy R1 proof) + RTC timestamps (PCF8563 @0x51,
-    i2c1 mutex'd with OLED).
+  - [x] **PCF8563 RTC — wall-clock log stamps** — **DONE, HIL-verified** *(2026-06-20)*: PCF8563 @0x51
+    on I2C1, new `src/rtc_pcf8563.{c,h}` + `src/i2c1_bus.{c,h}` (shared-bus mutex closing the OLED↔RTC
+    race); `hw_rtc_read` wired → recorder stamps wall-clock; CDC1 `{"q":"time"}`/`{"q":"settime"}`.
+    `tests/m2/rtc_hil.py`: set→tick→reboot→new session header `start 2026-06-20 21:59:32` (not `+0s`).
+  - [~] **SD-write-during-flash coexistence soak** (heavy R1 proof) — IN PROGRESS. First attempt's harness
+    was FLAWED: it generated SD load by having the HOST inject via UART loopback, so the host drove BOTH
+    probe-rs (DAP) and a heavy CDC0 stream → host-side USB contention (not the SD-vs-DAP thing we want),
+    AND `rx=0` showed the injection never reached the recorder. The over-heavy run also brown-out-glitched
+    the TARGET's QSPI flash (reads `0x00ffffff`; CPU cores still answer SWD) → needs a physical
+    power-cycle. Probe firmware + M2 recorder stayed healthy throughout. REDESIGN: device-side recorder
+    load generator (a CDC1 test hook) so the host only runs probe-rs and the SD-write load is internal —
+    cleanly isolates "SD writes during flash" from host USB contention.
 - [ ] M3 core screens; M4 full UI parity; M5 polish + tagged release (.uf2 + .elf).
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,
   tighter analyzers, RTT observability.
