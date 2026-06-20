@@ -33,6 +33,7 @@
 #include "crash_box.h"              // lastfault readout + the crash HIL self-test
 #include "watchdog_task.h"          // wd_arm + g_tud_wedge (watchdog control + HIL test)
 #include "uart_bridge.h"            // uart ring stats + loopback toggle (CDC0 bridge HIL test)
+#include "sd_gate.h"                // M2: SD bring-up self-test result ({"q":"sd"})
 
 // Build-discriminating tags compiled into the status reply so the RUNNING firmware proves its OWN
 // identity (closes the Gate-1 provenance gap). Mirror the CMake -D flags (PRIVATE on the target).
@@ -141,6 +142,7 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   if (!strcmp(q, "dump"))      { write_status(itf); write_lastfault(itf); return; }
   if (!strcmp(q, "wd_arm"))    { wd_arm(); reply(itf, "{\"wd\":\"armed\"}\n"); return; }
   if (!strcmp(q, "wd_reset"))  { wd_gap_reset(); reply(itf, "{\"wd_gap\":0}\n"); return; }
+  if (!strcmp(q, "sd"))        { static char r[160]; sd_gate_status_json(r, sizeof r); reply(itf, r); return; }
   if (!strcmp(q, "next"))      { s_page++; write_page(itf); return; }
   if (!strcmp(q, "prev"))      { if (s_page > 0) s_page--; write_page(itf); return; }
   // UART-bridge HIL self-test: PL011 internal loopback (TX->RX in-chip) — round-trip CDC0 with no jumper.

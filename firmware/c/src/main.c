@@ -58,6 +58,7 @@
 #include "hackagotchi_dashboard.h"   // [HACKAGOTCHI] 1/3
 #include "crash_box.h"               // [HACKAGOTCHI] M1 reliability core — post-mortem fault box
 #include "watchdog_task.h"           // [HACKAGOTCHI] M1 reliability core — SW watchdog
+#include "sd_gate.h"                 // [HACKAGOTCHI] M2 — SD bring-up gate (low-prio SD/FatFs task)
 
 // UART0 for debugprobe debug
 // UART1 for debugprobe to target device
@@ -199,6 +200,10 @@ int main(void) {
         xTaskCreate(dashboard_task, "DASH", DASHBOARD_TASK_STACK, NULL, DASHBOARD_TASK_PRIO, &dashboard_taskhandle);
         // [HACKAGOTCHI] M1: SW-watchdog health task (highest prio; disarmed until wd_arm over CDC1).
         xTaskCreate(watchdog_task, "WD", configMINIMAL_STACK_SIZE, NULL, WD_TASK_PRIO, &watchdog_taskhandle);
+        // [HACKAGOTCHI] M2: SD task at the LOWEST priority (idle+0, strictly below DAP) — FatFs writes
+        // block, so they must never preempt the probe path. Generous stack (FatFs + SD driver). The SW
+        // watchdog will catch a stack overflow here via the crash box.
+        xTaskCreate(sd_gate_task, "SD", 1024, NULL, tskIDLE_PRIORITY + 0, &sd_gate_taskhandle);
         vTaskStartScheduler();
     }
 

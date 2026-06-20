@@ -57,7 +57,14 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     TX (replaced uart_write_blocking) + error-code/goto-cleanup idiom codified (`docs/firmware-conventions.md`). *(2026-06-20)*
   - [x] **Watchdog armed-by-default** *(2026-06-20)*: monitors TUD (DAP can't starve it); proven to FIRE on a
     real wedge (`watchdog_hil.py`) and NOT false-fire under 25-flash DAP soak (`watchdog_soak.py`).
-- [ ] M2 SD + black-box logging (carlk3 FatFs, low-prio writer); RTC timestamps.
+- [~] **M2 SD + black-box logging** — IN PROGRESS (`firmware/c/tests/m2/M2_RESULTS.md`).
+  - [x] **SD bring-up gate** — **PASS, HIL-verified** *(2026-06-20)*: carlk3 FatFs v3.6.2 (fetched by
+    setup.sh) on SPI0 GP2/3/4/CS28, low-prio SD task; `{"q":"sd"}` → mount+write+readback OK on a real
+    16 GB FAT32 card; DAP binds, M1 regression green. Heap trimmed 64→44 KB (FreeRTOSConfig overlay) to
+    fit FatFs under copy_to_ram. RTC confirmed PCF8563 (not PCF85063A).
+  - [ ] recorder core (recorder.c + host unit tests: naming/flush/visible-stop/wedge/freeze/heartbeat).
+  - [ ] wire to HW: 2nd ring + cdc_task fan-out + low-prio recorder→SD; CDC1 status; SD-write-during-flash soak.
+  - [ ] RTC timestamps (PCF8563 @0x51, i2c1 mutex'd with OLED). Consider FF_USE_LFN=0 for RAM headroom.
 - [ ] M3 core screens; M4 full UI parity; M5 polish + tagged release (.uf2 + .elf).
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,
   tighter analyzers, RTT observability.
