@@ -16,8 +16,11 @@
  * Storage (verified against memmap_copy_to_ram.ld): the record lives in `.uninitialized_data`
  * (NOLOAD) — outside [__bss_start__, __bss_end__], so crt0 never zeroes it and the copy_to_ram
  * bootrom load never overwrites it; it therefore survives a warm/watchdog reset (and is garbage on a
- * COLD power-on, which `magic` guards). The essentials are also mirrored into the RP2040 watchdog
- * scratch registers — an independent, guaranteed-survival cross-check.
+ * COLD power-on, which `magic` guards). That placement is regression-guarded by tests/m1/crashbox_hil.py
+ * (a misplaced g_box would read "none" after the forced-fault reboot and FAIL the test). The essentials
+ * are also mirrored into the RP2040 watchdog scratch registers for external (debugger/picotool)
+ * inspection — same warm-reset survival as .uninitialized_data, NOT an independent recovery path
+ * (firmware does not read the mirror back).
  */
 #ifndef HACKAGOTCHI_CRASH_BOX_H
 #define HACKAGOTCHI_CRASH_BOX_H

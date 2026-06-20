@@ -225,14 +225,17 @@ absence of a false-fire margin — it corroborates.) Verified **both directions*
 armed-by-default build:
 - FIRES on a real wedge — `watchdog_hil.py` (wd_armed=1 at boot, no manual arm; wd_test wedges TUD →
   `kind=watchdog/task=TUD` → reboot → wd_armed=1 again).
-- Does NOT false-fire under load — `watchdog_soak.py`. It resets the stall peak (`wd_reset`), then runs
-  a background DAP flash thread **and** a concurrent CDC0 firehose, and gates on three device-sourced
-  signals: (i) the **TUD heartbeat advanced +1.65 M** — positive proof the load genuinely reached the
-  MONITORED task (not idle); (ii) `up` monotonic + `crashes` steady — no false-fire; (iii) **`wd_gap`
-  stayed 0 ms *since reset*** — TUD never missed a 500 ms window under load ≪ the 4000 ms threshold.
-  Live (`logs/watchdog_soak.log`): 118 flashes [0 failed] + 41 KB firehose, up 55→137. (Also a heavy
-  DAP↔CDC coexistence pass.) NB: `wd_gap` is reset-relative + paired with the heartbeat-advance gate —
-  the raw peak is otherwise a stale boot-latched value and must not be used as a standalone margin.
+- Does NOT false-fire under load — `watchdog_soak.py` (a CORROBORATION, deliberately not a margin proof).
+  It resets the stall peak (`wd_reset`), runs a background DAP flash thread + concurrent CDC0 firehose
+  for 80 s, and gates on what it can honestly decide: it did real work (`flash_ok ≥ 5`), it did not
+  reboot (`up` monotonic), nothing faulted/fired (`crashes` steady), and TUD missed no check-in window
+  this run (`wd_gap` 0 ms *since reset*). Live (`logs/watchdog_soak.log`): 118 flashes [0 failed] +
+  41 KB firehose, up monotonic, wd_gap 0. **What it does NOT claim:** that the load *stressed* TUD —
+  the TUD heartbeat free-runs at ~20 kHz even idle (so it can't prove load-correlation), and being
+  high-priority TUD is never driven near the 4000 ms threshold by any normal load. That last fact *is*
+  the safety guarantee (the priority argument: TUD +2 > DAP +1); the soak corroborates it under load.
+  (Earlier revisions over-claimed a "measured margin" / "proof the load reached TUD" via `wd_gap` and
+  `tud` — both were stale/free-running tautologies caught by the audit and removed; see Audit below.)
 
 **(d) Error-code + goto-cleanup idiom** — codified as the project convention in
 `docs/firmware-conventions.md` (M1 modules are single-resource/early-return; the full idiom earns its
@@ -290,15 +293,25 @@ mirrors the gate convention), not just the inline transcripts.
 - the soak left the target Pico W holding `blink_a.elf` (it's the test mule / M2 SWD target — restore
   PicoInky if a dashboard mule is wanted).
 
-**Audit (three rounds, `audit-m1-complete`):** every round returned the plan + code-consistency lenses
-COMPLETE and only test-rigor INCOMPLETE — no missing deliverables, only evidence gaps, all now closed.
-Round 1: tautological soak, stale-peak `urx_hw`, "soak-proven" overclaim, disarmed↔armed doc drift.
-Round 2: `ring_test.c` assert()/NDEBUG silent-pass (HIGH) → CHECK-macro + verify-the-verifier; ring
-concurrency untested → 4 M-op threaded fence stress; fragmentation → `frag` counter asserted; mallocfail
-→ `oom_test` directly triggers it. Round 3 (caught an OVERCORRECTION from round 2): the new `wd_gap`
-"margin" gate was itself a stale boot-latched peak — the very defect round 1 demoted `urx_hw` for, HIGH
-→ fixed with `wd_reset` + a positive TUD-heartbeat-advance gate (load provably reached the monitored
-task) + reset-relative `wd_gap`; plus uptime-reset reboot witness + wd_arm reply asserted. (Discipline:
-accept the verdict, fix the substance, re-run — even when the fix exposes your own earlier fix's flaw.)
+**Audit (`audit-m1-complete`, four rounds):** every round returned the plan + code-consistency lenses
+COMPLETE and only test-rigor INCOMPLETE — **no missing deliverables, only evidence gaps**, all closed.
+- R1: tautological soak, stale-peak `urx_hw`, "soak-proven" overclaim, disarmed↔armed doc drift.
+- R2: `ring_test.c` assert()/NDEBUG silent-pass (HIGH) → CHECK-macro + verify-the-verifier; ring
+  concurrency untested → 4 M-op threaded fence stress; `frag` counter; `oom_test` (direct mallocfail).
+- R3 (caught my R2 overcorrection): the new `wd_gap` "margin" gate was a stale boot-latched peak (HIGH)
+  → `wd_reset` + reset-relative; + uptime-reset reboot witness; + wd_arm reply asserted.
+- R4 (caught my R3 overcorrection — same class, twice): the replacement `tud_delta` "load reached TUD"
+  gate was ALSO tautological (the TUD heartbeat free-runs at ~20 kHz idle, so it clears any threshold
+  with zero load) (HIGH). **Resolution: stop manufacturing a "load stressed TUD" signal — a soak
+  cannot prove a margin here because no normal load drives the high-prio TUD near the threshold (which
+  IS the safety guarantee).** The soak now claims only what it can decide: ran-under-load + no-reboot +
+  no-fault + no-missed-window; the priority argument is the guarantee, the soak corroborates. Plus:
+  crash-box scratch-mirror wording corrected (inspection aid, not an independent recovery path) +
+  placement regression-guarded by `crashbox_hil.py`; CI gates reconciled to M2 in `engineering-plan` §7.
+
+**The lesson (recorded for M2+):** the deliverables were complete from the start; the iteration was all
+about *evidence honesty*. Twice I "fixed" a weak gate by inventing a new signal that was itself
+load-independent. The right move for an unprovable claim is to **stop claiming it**, not to add another
+tautological gate. Bar for done = no unaddressed silent-pass + every gap disclosed — met.
 
 **Cleared to start M2** (SD + black-box logging — the recorder drains the same `spsc_ring`).
