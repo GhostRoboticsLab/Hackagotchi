@@ -35,10 +35,16 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     *(2026-06-20)*: `isr_hardfault` overlay captures the M0+ exception frame to `.uninitialized_data`
     (survives the watchdog reboot — verified outside the bss clear), surfaced via CDC1 `{"q":"lastfault"}`;
     `tests/m1/crashbox_hil.py` forces a fault and asserts capture+survival+re-enumeration (0→1).
-  - [ ] **SW-watchdog task** (per-task check-in counters feed the HW WDT) — needs its own HIL test.
-  - [ ] `{"q":"bootsel"}` CDC1 command (`reset_usb_boot`) to reflash without a manual BOOTSEL.
+  - [x] **SW-watchdog task** — **PASS, HIL-verified** *(2026-06-20)*: monitors the high-prio TUD task
+    (not a low-prio one — would false-reset mid-flash), records `kind=watchdog/task=TUD` + reboots;
+    disarmed by default (HW WDT off until `wd_arm`); `tests/m1/watchdog_hil.py` (arm→wedge→assert).
+  - [x] **`{"q":"bootsel"}`** CDC1 command (`reset_usb_boot`) — **PASS, HIL-verified** *(2026-06-20)*:
+    dropped to BOOTSEL + reflashed via `picotool` with no button. Dev loop is now hands-free.
+    Recovery guarantees documented in `docs/recovery-model.md`.
   - [ ] jsmn parser (replace `strstr`) + `next`/`prev`/`dump`; bounded SPSC UART bridge;
     per-interface USB string descriptors; error-code+goto-cleanup idiom.
+  - [ ] Watchdog hardening: characterise DAP/UART/DASH cadence under flash load → monitor them +
+    flip the watchdog to armed-by-default.
 - [ ] M2 SD + black-box logging (carlk3 FatFs, low-prio writer); RTC timestamps.
 - [ ] M3 core screens; M4 full UI parity; M5 polish + tagged release (.uf2 + .elf).
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,

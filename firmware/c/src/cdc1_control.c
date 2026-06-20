@@ -10,11 +10,14 @@
 #include <stdio.h>
 #include <pico/stdlib.h>
 
+#include "pico/bootrom.h"           // M1: reset_usb_boot for {"q":"bootsel"}
+
 #include "FreeRTOS.h"
 #include "task.h"
 #include "tusb.h"
 #include "hackagotchi_dashboard.h"  // g_dash_counter, g_dash_stall_us (self-attestation telemetry)
 #include "crash_box.h"              // M1: lastfault readout + the crash HIL self-test
+#include "watchdog_task.h"          // M1: wd_arm + g_tud_wedge (watchdog control + HIL test)
 
 // Build-discriminating tags compiled into the status reply so the RUNNING firmware proves its OWN
 // identity (closes the Gate-1 provenance gap: stock vs adversarial probe images were otherwise
@@ -42,6 +45,29 @@ void tud_cdc_rx_cb(uint8_t itf)
   uint32_t n = tud_cdc_n_read(itf, buf, sizeof(buf) - 1);
   if (n == 0) return;
   buf[n] = '\0';
+
+  // M1: reboot into BOOTSEL on demand — debugprobe has no reset interface, so this is what lets the
+  // probe be reflashed via `picotool load` WITHOUT a manual BOOTSEL button. Does not return.
+  if (strstr(buf, "bootsel")) {
+    reset_usb_boot(0, 0);
+    return;  // unreachable
+  }
+
+  // M1 watchdog control: arm enforcement (enables the HW WDT + stall->reboot; disarmed by default).
+  if (strstr(buf, "wd_arm")) {
+    wd_arm();
+    const char *r = "{\"wd\":\"armed\"}\n";
+    tud_cdc_n_write(itf, r, (uint32_t) strlen(r));
+    tud_cdc_n_write_flush(itf);
+    return;
+  }
+
+  // M1 watchdog HIL self-test: wedge the TUD task so the (armed) watchdog must catch it and reboot.
+  // USB goes silent until the reboot; the host detects re-enumeration then reads {"q":"lastfault"}.
+  if (strstr(buf, "wd_test")) {
+    g_tud_wedge = true;
+    return;
+  }
 
   // M1 crash-box HIL self-test: force a real HardFault on demand so the gate can prove the box
   // captures a fault and surfaces it after the reboot. The store to an UNMAPPED address (0xF0000000
@@ -74,11 +100,12 @@ void tud_cdc_rx_cb(uint8_t itf)
     // adversarial busy_wait actually FIRED (~50000us), stall_cfg+prio identify WHICH build is running.
     int len = snprintf(reply, sizeof reply,
                        "{\"fw\":\"Hackagotchi\",\"heap\":%u,\"up\":%u,"
-                       "\"n\":%u,\"stall_cfg\":%d,\"stall_us\":%u,\"prio\":%d,\"crashes\":%u}\n",
+                       "\"n\":%u,\"stall_cfg\":%d,\"stall_us\":%u,\"prio\":%d,"
+                       "\"crashes\":%u,\"wd_armed\":%d}\n",
                        heap, up,
                        (unsigned) g_dash_counter, (int) ADVERSARIAL_STALL_MS,
                        (unsigned) g_dash_stall_us, (int) HACKA_DASH_PRIO,
-                       (unsigned) crash_box_count());
+                       (unsigned) crash_box_count(), (int) wd_is_armed());
     if (len > 0) {
       tud_cdc_n_write(itf, reply, (uint32_t) len);
       tud_cdc_n_write_flush(itf);

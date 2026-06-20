@@ -46,6 +46,7 @@ add_executable(hackagotchi_probe
         ${CMAKE_CURRENT_LIST_DIR}/src/cdc_uart.c             # Gate 2: itf-guard the CDC class callbacks
         ${CMAKE_CURRENT_LIST_DIR}/src/cdc1_control.c         # Gate 2: CDC1 JSON control handler
         ${CMAKE_CURRENT_LIST_DIR}/src/crash_box.c            # M1: post-mortem crash box + HardFault handler
+        ${CMAKE_CURRENT_LIST_DIR}/src/watchdog_task.c        # M1: SW watchdog (HW WDT + per-task check-in)
         # --- pristine upstream debugprobe sources ---
         ${UPSTREAM}/src/probe_config.c
         ${UPSTREAM}/src/probe.c
@@ -96,7 +97,8 @@ target_link_libraries(hackagotchi_probe PRIVATE
         tinyusb_board
         hardware_pio
         hardware_i2c            # OLED coexistence task
-        hardware_watchdog       # M1 crash box: watchdog_reboot + scratch-register mirror
+        hardware_watchdog       # M1 crash box: watchdog_reboot + scratch-register mirror; SW watchdog
+        pico_bootrom            # M1: reset_usb_boot for the {"q":"bootsel"} self-reflash command
         FreeRTOS-Kernel
         FreeRTOS-Kernel-Heap4   # heap_4: supports vPortFree + xPortGetMinimumEverFreeHeapSize (Gate-1 metric)
 )

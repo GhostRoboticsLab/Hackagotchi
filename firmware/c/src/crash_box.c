@@ -29,13 +29,15 @@ typedef struct {
 // NOLOAD RAM: survives a warm/watchdog reset (see header). `used` so LTO/GC never drops it.
 static crashbox_t __attribute__((section(".uninitialized_data"), used)) g_box;
 
-static char g_report[176] = "none";
+// Default is the JSON literal `null` so `{"fault":%s}` is valid JSON when clean.
+static char g_report[176] = "null";
 
 static const char *kind_str(uint32_t k) {
     switch (k) {
         case CRASH_HARDFAULT:      return "hardfault";
         case CRASH_STACK_OVERFLOW: return "stackoverflow";
         case CRASH_MALLOC_FAIL:    return "mallocfail";
+        case CRASH_WATCHDOG:       return "watchdog";
         default:                   return "none";
     }
 }
@@ -123,6 +125,20 @@ void crash_box_panic_malloc_failed(void) {
     g_box.lr = 0;
     g_box.extra = 0;
     g_box.task[0] = '\0';
+    reboot_now();
+}
+
+void crash_box_record_watchdog(const char *task_name) {
+    record_common(CRASH_WATCHDOG);
+    g_box.pc = (uint32_t)__builtin_return_address(0);
+    g_box.lr = 0;
+    g_box.extra = 0;
+    if (task_name) {
+        strncpy(g_box.task, task_name, sizeof g_box.task - 1);
+        g_box.task[sizeof g_box.task - 1] = '\0';
+    } else {
+        g_box.task[0] = '\0';
+    }
     reboot_now();
 }
 

@@ -30,6 +30,7 @@ typedef enum {
     CRASH_HARDFAULT      = 1,
     CRASH_STACK_OVERFLOW = 2,
     CRASH_MALLOC_FAIL    = 3,
+    CRASH_WATCHDOG       = 4,  // SW-watchdog caught a monitored task stalled
 } crash_kind_t;
 
 // Call ONCE early in main(), after stdio is up. If a fault was pending from the previous run it is
@@ -48,5 +49,8 @@ uint32_t crash_box_count(void);
 // Does not return.
 void crash_box_panic_stack_overflow(const char *task_name) __attribute__((noreturn));
 void crash_box_panic_malloc_failed(void) __attribute__((noreturn));
+
+// Record a SW-watchdog stall (the named task stopped checking in) then reboot. Does not return.
+void crash_box_record_watchdog(const char *task_name) __attribute__((noreturn));
 
 #endif // HACKAGOTCHI_CRASH_BOX_H
