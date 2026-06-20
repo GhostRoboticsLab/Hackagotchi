@@ -188,6 +188,7 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   // {"q":"screen"} -> report the current screen + rendered-text attestation (HIL: content + frames-flush).
   // {"q":"screen","n":N} -> jump to screen N (clamped by the dashboard), then report.
   if (!strcmp(q, "screen"))    { int v; if (get_int(line, tok, n, "n", &v)) dash_nav_to(v); write_screen(itf); return; }
+  if (!strcmp(q, "hex"))       { bool m = dash_hex_toggle(); char r[20]; snprintf(r, sizeof r, "{\"hex\":%d}\n", m ? 1 : 0); reply(itf, r); return; }
   // UART-bridge HIL self-test: PL011 internal loopback (TX->RX in-chip) — round-trip CDC0 with no jumper.
   if (!strcmp(q, "uloop_on"))  { uart_bridge_set_loopback(PROBE_UART_INTERFACE, true);  reply(itf, "{\"uloop\":1}\n"); return; }
   if (!strcmp(q, "uloop_off")) { uart_bridge_set_loopback(PROBE_UART_INTERFACE, false); reply(itf, "{\"uloop\":0}\n"); return; }

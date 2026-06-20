@@ -150,6 +150,7 @@ static void publish_snapshot(void) {
         s.tp_peak  = st.tp_peak;  s.last_err = (int)st.last_err;
         snprintf(s.file, sizeof s.file, "%s", st.log_file);     // bounded copy, not a live pointer
         recorder_copy_tail(&g_rec, sizeof s.tail - 1, s.tail, sizeof s.tail);
+        s.rawn = (uint8_t)recorder_copy_raw_tail(&g_rec, sizeof s.raw, s.raw, sizeof s.raw);  // M4 hex view
     }
     s.sd_mounted = s_mounted;
     s.rec_drop   = uart_bridge_rec_drops();

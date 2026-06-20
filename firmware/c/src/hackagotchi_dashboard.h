@@ -42,6 +42,8 @@ extern volatile uint32_t g_dash_stack_free;// M3.1: dashboard task stack high-wa
 void dash_nav_step(int delta);   // next/prev: accumulate +/-1 (relative)
 void dash_nav_to(int idx);       // {"q":"screen","n":N}: absolute target
 int  dash_screen_count(void);    // number of screens (for clamping / echo)
+bool dash_hex_toggle(void);      // M4: toggle the SNIFFER hex view; returns the new mode (1=hex)
+bool dash_hex_mode(void);        // M4: current SNIFFER hex-view mode
 
 // --- M3.1 self-attestation: copy the EXACT rendered text of the current frame (title + lines, joined by
 // '\n') into out[]; returns the current screen index. The text IS what was drawn to the OLED this frame

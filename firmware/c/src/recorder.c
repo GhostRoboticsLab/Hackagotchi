@@ -217,3 +217,13 @@ void recorder_get_status(const recorder_t *r, recorder_status_t *out) {
 void recorder_copy_tail(const recorder_t *r, size_t k, char *out, size_t outsz) {
     freeze_read_last(r, k, out, outsz);  // public alias; owning task only (see header)
 }
+
+size_t recorder_copy_raw_tail(const recorder_t *r, size_t k, uint8_t *out, size_t outsz) {
+    size_t have = (r->freeze_total < REC_FREEZE_CAP) ? r->freeze_total : REC_FREEZE_CAP;
+    size_t take = (k < have) ? k : have;
+    if (take > outsz) take = outsz;
+    size_t start = (size_t)r->freeze_total - take;
+    for (size_t i = 0; i < take; i++)
+        out[i] = r->freeze[(start + i) % REC_FREEZE_CAP];
+    return take;
+}

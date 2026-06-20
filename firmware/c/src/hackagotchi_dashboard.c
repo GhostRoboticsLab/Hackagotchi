@@ -54,6 +54,12 @@ static volatile int32_t s_nav_abs   = -1;
 void dash_nav_step(int delta) { __atomic_fetch_add(&s_nav_delta, delta, __ATOMIC_RELAXED); }
 void dash_nav_to(int idx)     { __atomic_store_n(&s_nav_abs, idx, __ATOMIC_RELAXED); }
 
+// M4: hex-sniffer view mode (SNIFFER screen toggles ASCII<->hex). Dashboard-local; flipped over CDC1
+// {"q":"hex"}. A plain bool is fine — single writer (the CDC1 handler), read by the render loop.
+static volatile bool s_hex_mode = false;
+bool dash_hex_toggle(void) { s_hex_mode = !s_hex_mode; return s_hex_mode; }
+bool dash_hex_mode(void)   { return s_hex_mode; }
+
 // --- derived dashboard state (updated once per frame, read by the screen fns) ---
 typedef struct {
     rec_snapshot_t snap;
@@ -222,6 +228,26 @@ static void screen_home(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
 
 // 1 — SNIFFER: live UART tail (the recorder freeze tail), wrapped to 21-col lines.
 static void screen_sniffer(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
+    if (s_hex_mode) {   // M4: hex view — 5 bytes/row (uppercase) + ASCII gutter, last min(30,n) raw bytes
+        hdr(d, s, "HEX SNIFFER");
+        const uint8_t *b = c->snap.raw;
+        int n = c->snap.rawn;
+        if (n == 0) { row(d, s, 0, "(no traffic yet)"); return; }
+        for (int r = 0; r * 5 < n && r < 6; r++) {
+            char ln[DASH_COLW]; int o = 0, base = r * 5;
+            for (int i = 0; i < 5 && base + i < n; i++)
+                o += snprintf(ln + o, sizeof ln - (size_t)o, "%02X ", b[base + i]);
+            while (o < 15 && o < (int)sizeof ln - 1) ln[o++] = ' ';   // pad to the ASCII gutter
+            for (int i = 0; i < 5 && base + i < n && o < (int)sizeof ln - 1; i++) {
+                uint8_t ch = b[base + i];
+                ln[o++] = (ch >= 32 && ch <= 126) ? (char)ch : '.';
+            }
+            ln[o] = '\0';
+            ssd1306_draw_string(d, 2, 11 + r * 9, 1, ln);
+            if (s->nlines < DASH_MAX_LINES) { snprintf(s->line[s->nlines], DASH_COLW, "%s", ln); s->nlines++; }
+        }
+        return;
+    }
     hdr(d, s, "UART RX LOG");
     const char *t = c->snap.tail;
     int len = (int)strlen(t);

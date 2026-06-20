@@ -36,6 +36,8 @@ typedef struct {
     char      file[16];      // current log filename (bounded copy, never a live pointer)
     char      alert[24];     // last recorder alert text (trigger hit / fault badge)
     char      tail[80];      // printable tail of the freeze ring (live-UART view)
+    uint8_t   rawn;          // M4: count of valid bytes in raw[] (hex sniffer)
+    uint8_t   raw[30];       // M4: last raw target bytes (untransformed) for the hex view
 } rec_snapshot_t;
 
 // Lock-free seqlock read of the published snapshot. Returns false only under (effectively impossible)

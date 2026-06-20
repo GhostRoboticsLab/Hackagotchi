@@ -117,4 +117,8 @@ void recorder_get_status(const recorder_t *r, recorder_status_t *out);
 // recorder_feed; reading it off-task would race the producer wrapping it).
 void recorder_copy_tail(const recorder_t *r, size_t k, char *out, size_t outsz);
 
+// Copy the freeze ring's last `k` RAW bytes in order (no transformation) into out[]; returns the count
+// copied (<= k, <= outsz). For the M4 hex sniffer; owning task only, same discipline as recorder_copy_tail.
+size_t recorder_copy_raw_tail(const recorder_t *r, size_t k, uint8_t *out, size_t outsz);
+
 #endif // HACKAGOTCHI_RECORDER_H
