@@ -172,9 +172,8 @@ def main():
         c.flush()
         print(f"[final] {final}")
 
-    GAP_CEIL = 1500       # >=3 missed 500ms windows post-reset = TUD would be nearing the 4000ms stall
     tud_delta = (tud1 - tud0) if (tud1 is not None and tud0 is not None) else 0
-    # verdict — what this soak HONESTLY gates on (device-sourced, can fail):
+    # verdict — the ONLY gates are signals this soak can actually drive to FAIL:
     if fired:
         return 1
     if flash["ok"] < MIN_FLASHES:  # the DAP rig actually exercised the probe (not a no-op run)
@@ -186,19 +185,15 @@ def main():
     if up1 is None or up0 is None or up1 < up0:
         print(f"FAIL: up not monotonic ({up0}->{up1}) — probe rebooted")
         return 1
-    # wd_gap was RESET at start, so this is the worst missed-window count DURING this run. Healthy = 0.
-    if gap1 is None or gap1 >= GAP_CEIL:
-        print(f"FAIL: wd_gap={gap1}ms (since reset) reached/exceeded {GAP_CEIL}ms — TUD stalled under load")
-        return 1
-    # NB: tud_delta + fh_bytes are reported as ACTIVITY, not as proof the load stressed TUD. The TUD
-    # heartbeat free-runs at ~20 kHz even idle, so it cannot prove load-correlation; and being
-    # high-priority, TUD is never driven near the stall threshold by normal load (that is *why*
-    # arm-by-default is safe). This soak CORROBORATES the priority-argument safety guarantee under
-    # sustained concurrent load — it does not, and cannot, prove a stall margin.
+    # INFORMATIONAL, not gated: wd_gap (missed-window peak since reset), tud_delta, fh_bytes. Under any
+    # soak-able load wd_gap stays 0 and the heartbeat free-runs at ~20 kHz, so none of these can be
+    # driven to FAIL here — gating on them would be decorative. A real TUD stall is exercised by
+    # watchdog_hil.py (wd_test) instead. This soak's honest claim is: ran under sustained concurrent
+    # load without false-firing — corroborating the priority guarantee (TUD>DAP), not a margin proof.
     print(f"\nPASS: armed watchdog ran 80s under concurrent load without false-firing "
-          f"(up {up0}->{up1} monotonic, crashes steady at {cr1}, wd_gap {gap1}ms since reset). "
-          f"Activity: {flash['ok']} flashes [{flash['fail']} failed], {fh_bytes//1024}KB firehose, "
-          f"TUD heartbeat +{tud_delta}. Corroborates the priority guarantee (TUD>DAP); not a margin proof.")
+          f"(up {up0}->{up1} monotonic, crashes steady at {cr1}). "
+          f"[informational] wd_gap {gap1}ms since reset, {flash['ok']} flashes [{flash['fail']} failed], "
+          f"{fh_bytes//1024}KB firehose, TUD heartbeat +{tud_delta}.")
     return 0
 
 

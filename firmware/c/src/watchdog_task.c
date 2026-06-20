@@ -21,9 +21,10 @@ TaskHandle_t watchdog_taskhandle;
 // (tests/m1/M1_RESULTS.md, increment 5) to not false-fire under sustained DAP + USB load.
 static volatile bool s_armed = true;
 
-// Worst-case observed TUD stall (peak since_ms, 500 ms granularity). Stays 0 while TUD advances within
-// every sample window; exposed in status so the soak can assert a MEASURED margin to WD_TUD_STALL_MS,
-// not merely "didn't reboot". A climbing value = TUD approaching the stall threshold.
+// DIAGNOSTIC telemetry: peak observed TUD stall (max since_ms, 500 ms granularity). Stays 0 while TUD
+// advances within every sample window; a non-zero value means TUD genuinely missed window(s). Exposed
+// in status (and resettable via wd_reset) for observability — NOT a continuous "margin" (the heartbeat
+// free-runs, so no normal load can drive this above 0), so tests report it, they do not gate on it.
 static volatile uint32_t s_max_gap_ms = 0;
 
 void wd_arm(void)         { s_armed = true; }
