@@ -1,6 +1,6 @@
 /*
  * Hackagotchi — M1 reliability core: software watchdog task. SPDX-License-Identifier: MIT
- * See watchdog_task.h for the rationale (monitor the high-prio TUD task; disarmed by default).
+ * See watchdog_task.h for the rationale (monitor the high-prio TUD task; armed by default).
  */
 
 #include "watchdog_task.h"

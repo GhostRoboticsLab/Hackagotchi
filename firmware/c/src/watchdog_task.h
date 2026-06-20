@@ -12,10 +12,12 @@
  * TUD task is high-priority and always loops; its silence means a true wedge. (DAP/UART/DASH
  * check-ins can be added once each task's cadence under load is characterised.)
  *
- * ARMED BY DEFAULT (shipping posture: a debug probe must never sit silently wedged). This is safe
- * because we monitor TUD (prio +2): DAP (prio +1) is lower, so flash load can never starve TUD, and
- * TUD goes silent only on a real wedge — so arm-by-default cannot false-fire under load (soak-proven).
- * The HW WDT (8 s) backstops the watchdog task itself dying. wd_arm() remains as an idempotent re-arm.
+ * ARMED BY DEFAULT (shipping posture: a debug probe must never sit silently wedged). Safety rests on
+ * the PRIORITY GUARANTEE: we monitor TUD (prio +2); DAP (prio +1) is lower, so flash load can never
+ * starve TUD, and TUD goes silent only on a real wedge — so arm-by-default cannot false-fire under
+ * normal load. That argument is soak-CORROBORATED (watchdog_soak.py: sustained DAP flash + CDC
+ * firehose, no fire), not soak-proven (a soak can't show absence of a margin). The HW WDT (8 s)
+ * backstops the watchdog task itself dying. wd_arm() remains as an idempotent re-arm.
  */
 #ifndef HACKAGOTCHI_WATCHDOG_TASK_H
 #define HACKAGOTCHI_WATCHDOG_TASK_H

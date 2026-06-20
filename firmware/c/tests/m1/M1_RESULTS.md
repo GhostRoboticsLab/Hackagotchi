@@ -69,6 +69,12 @@ recovering and DAP intact.
 
 ## Increment 2 — SW watchdog + self-reflash (`{"q":"bootsel"}`) — **PASS (live, 2026-06-20)**
 
+> **SUPERSEDED by Increment 5(c):** this increment introduced the watchdog **disarmed by default** (a
+> conservative dev-state) and the transcript below was captured against that build. The **as-shipped
+> posture is now ARMED BY DEFAULT** — see Increment 5(c) for the armed-by-default code, the re-run
+> `watchdog_hil.py` (wd_armed=1 at boot, no manual arm), and the strengthened safety soak. The
+> mechanism (monitor TUD, record `kind=watchdog`, reboot) is unchanged.
+
 **Falsifiable claims.** (a) An ARMED software watchdog detects the high-priority TUD task wedged,
 records `kind=watchdog, task=TUD` into the crash box, and reboots the re-enumerating probe. (b)
 `{"q":"bootsel"}` drops the probe to BOOTSEL so it can be reflashed via `picotool` with **no physical
@@ -210,12 +216,17 @@ to ~133 ms at 1200 baud, above DAP) with push-only-what-the-TX-FIFO-takes; the r
 FIFO (USB back-pressures the host). Artifact: **0 `uart_write_blocking` refs in `cdc_task`**. The
 loopback HIL (which drives host→CDC0→TX) still round-trips byte-identical.
 
-**(c) Watchdog armed by default + soak-proven.** `s_armed` defaults true. Safe because it monitors TUD
-(prio +2): DAP (prio +1) is below it, so flash load can never starve TUD; TUD goes silent only on a
-true wedge. Proven **both directions**:
-- FIRES on a real wedge — `watchdog_hil.py` (wd_test wedges TUD → `kind=watchdog/task=TUD` → reboot).
-- Does NOT false-fire under load — `watchdog_soak.py`: 25 target flashes over DAP, `up` 114→175
-  monotonic, `crashes` steady at 7, `wd_armed` held 1. This is the "characterise under flash load" proof.
+**(c) Watchdog armed by default — priority-argued + soak-corroborated.** `s_armed` defaults true. The
+safety guarantee is the PRIORITY argument: it monitors TUD (prio +2); DAP (prio +1) is below it, so
+flash load can never starve TUD, and TUD goes silent only on a true wedge. (A soak can't *prove* the
+absence of a false-fire margin — it corroborates.) Verified **both directions**, re-run against the
+armed-by-default build:
+- FIRES on a real wedge — `watchdog_hil.py` (wd_armed=1 at boot, no manual arm; wd_test wedges TUD →
+  `kind=watchdog/task=TUD` → reboot → wd_armed=1 again).
+- Does NOT false-fire under load — `watchdog_soak.py` (strengthened to load the MONITORED task: a
+  background DAP flash thread **and** a concurrent CDC0 loopback firehose hammering TUD; no-op runs are
+  rejected by requiring real flashes): **120 flashes [0 failed] + 44 KB CDC firehose, `up` 41→122
+  monotonic, `crashes` steady at 9, `wd_armed` held 1.** (Also a heavy DAP↔CDC coexistence pass.)
 
 **(d) Error-code + goto-cleanup idiom** — codified as the project convention in
 `docs/firmware-conventions.md` (M1 modules are single-resource/early-return; the full idiom earns its
@@ -242,11 +253,25 @@ All M1 deliverables done and HIL-verified on hardware:
 **Findings recorded:** F1-1..F1-3 (gates), **F1-4** (JSON parser locals overflow the small TUD task
 stack → ENXIO; fix = static buffers + bigger stack).
 
+**Plan reconciliations (intentional deviations from `docs/engineering-plan.md`):**
+- **Priority order:** the plan §4.1 sketches TinyUSB > UART-bridge; the fork keeps upstream debugprobe's
+  **UART-bridge (+3) > TUD (+2) > DAP (+1) > dashboard (+0)** (UART must preempt USB or bytes are lost).
+  The watchdog being above this whole stack and monitoring TUD is unchanged. (Noted in
+  `docs/firmware-conventions.md` §2.)
+- **Ceedling/Unity host-test CI:** the plan wants a host-test CI job; M1 ships a host test
+  (`ring_test.c`, run via `cc`) but not yet a Ceedling CI job — it lands with **M2**, when the
+  log-rotation / wedge-detector logic gives it more to cover.
+
 **Disclosed deferrals (carried to M2+, not blockers):** high-baud burst-loss A/B not run (no fast UART
 source on the bench; the IRQ architecture prevents it by construction); DAP/UART/DASH not individually
 watchdog-monitored (TUD-keystone is the correct signal — DASH is starvable by design, UART is
 suspendable, DAP is upstream; per-DAP-progress monitoring is a possible M2 refinement); the soak left
 the target Pico W holding `blink_a.elf` (it's the test mule / M2 SWD target — restore PicoInky if a
 dashboard mule is wanted).
+
+**Audit:** an adversarial 3-lens audit (`audit-m1-complete`) flagged the above as test-rigor/doc
+issues (no missing deliverables); all were addressed — soak strengthened (concurrent TUD+DAP load,
+no-op rejected), `urx_hw` demoted to corroborating (round-trip is the per-run rank-1 signal), crash-box
+PC range-checked, "soak-proven" → "priority-argued + soak-corroborated", disarmed→armed docs reconciled.
 
 **Cleared to start M2** (SD + black-box logging — the recorder drains the same `spsc_ring`).

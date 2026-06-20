@@ -34,7 +34,10 @@ out:     return rc;
 ## 2. Never block on the hot path (anything at or above DAP priority)
 
 Priority order (single-core FreeRTOS, F1-1): UART-bridge +3 > TUD +2 > DAP +1 > dashboard +0, plus the
-SW-watchdog at +3. A task at or above DAP must not busy-wait or do slow I/O, or it delays the probe:
+SW-watchdog at +3. (This intentionally keeps upstream debugprobe's UART(+3) > TUD(+2) ordering — "UART
+must preempt USB or characters get lost" — rather than the engineering-plan §4.1 sketch of TinyUSB >
+UART; the load-bearing invariant is only that everything stays **above DAP**.) A task at or above DAP
+must not busy-wait or do slow I/O, or it delays the probe:
 
 - **No `uart_write_blocking` / `f_write` / `ssd1306_show` / `busy_wait` on a +1..+3 task.** The CDC0
   TX path was switched from `uart_write_blocking` to push-only-what-the-FIFO-takes (M1 increment 5)
