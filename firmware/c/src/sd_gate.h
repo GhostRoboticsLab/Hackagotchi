@@ -10,11 +10,16 @@
 #ifndef HACKAGOTCHI_SD_GATE_H
 #define HACKAGOTCHI_SD_GATE_H
 
+#include <stdbool.h>
 #include "FreeRTOS.h"
 #include "task.h"
 
 void sd_gate_task(void *ptr);
 extern TaskHandle_t sd_gate_taskhandle;
+
+// HIL hook: device-side recorder load generator for the SD-during-flash coexistence soak (continuous
+// SD writes with no host UART traffic). Toggled over CDC1 ({"q":"recgen_on"}/{"q":"recgen_off"}).
+void sd_recgen_set(bool on);
 
 // One-line JSON of the bring-up self-test result (for the CDC1 {"q":"sd"} reply).
 void sd_gate_status_json(char *out, unsigned outsz);

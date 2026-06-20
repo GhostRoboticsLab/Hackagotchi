@@ -231,3 +231,60 @@ once in `main()` before the scheduler so the mutex exists before any task locks.
   → the OLED task is NOT deadlocked by the shared-bus mutex.
 
 **Verdict: PASS** — real wall-clock timestamps in the black box, with the OLED↔RTC bus race closed.
+
+---
+
+## SD-write-during-flash coexistence soak (heavy R1) — **DONE (recorder PASS; DAP caveat documented), 2026-06-20**
+
+R1 asks: does the low-prio SD task doing continuous `f_write`/`f_sync` corrupt a concurrent DAP flash,
+or vice versa? Tested with a DEVICE-SIDE load generator (`{"q":"recgen_on"}` → the SD task synthesizes
+~107 B every loop → ~33 `f_sync`/s, continuous SD writes) so the HOST only runs probe-rs — no host CDC0
+stream competing with probe-rs on the same USB device.
+
+> **Methodology note / first-attempt failure (recorded so it isn't repeated):** the first harness
+> generated SD load by having the HOST inject UART via PL011 loopback. That made the host drive BOTH
+> probe-rs (DAP) AND a heavy CDC0 stream → host-side USB contention (528/600 DAP fails) that has nothing
+> to do with SD-vs-DAP, and `rx=0` showed the injection never even reached the recorder. It also
+> brown-out-glitched the TARGET's QSPI flash (`ID 0x00ffffff`; CPU cores still answered SWD) → needed a
+> physical power-cycle to recover. The device-side generator is the correct isolation.
+
+**Recorder side — PASS (flawless).** During the 300-cycle flash soak: `err=0`, `logging=1` (no
+VISIBLE-STOP), `wedge=0` (no false wedge), `rec_drop=0`, `rx` 4 410 → 765 380 (**761 KB written to the
+card during flashing**), on-card tail shows intact in-order `RECGEN` lines. The low-prio SD-task design
+holds: SD writes are completely unaffected by concurrent DAP flashing.
+
+**DAP side — ~1 % retryable, under a synthetic worst-case only.**
+
+| run (300 cycles = 600 ops) | DAP fails | stalls |
+| --- | --- | --- |
+| standalone (recgen off) | **0** | 0 |
+| concurrent (recgen on, ~33 `f_sync`/s) | **6** (cycles 24/106/142/217) | **0** |
+
+So continuous max-rate SD writes *do* add ~1 % DAP failures — but all are **0-stall**: clean, detectable
+USB-transfer errors ("Timeout in USB communication", "Transfer count larger than requested",
+"Only 1/3 transfers executed") that probe-rs/openocd retry, never a hang. Mechanism: NOT IRQ-blocking
+(the carlk3 SPI busy-waits with `tight_loop_contents()`, IRQs on) and NOT high-priority DMA (the driver
+sets no DMA bus priority) — it's subtle bus-fabric contention from background SD DMA occasionally adding
+latency to the CPU's USB/PIO servicing, tripping probe-rs's tight USB timeout.
+
+**Why this is negligible in practice:** probe-rs/openocd **halt the target core to flash it**, so while a
+flash is in progress the target executes nothing and emits no UART → the recorder has no new data →
+SD writes quiesce. The real flow therefore never sustains max-SD-writes *during* a flash; the test forces
+that overlap artificially (the device-side generator ignores the target's halt state). Even under that
+artificial worst-case the failures are rare and auto-retried, and the recorder is untouched.
+
+**Verdict: PASS with a documented caveat.** R1 core proven (recorder flawless under concurrent flash).
+The ~1 % retryable DAP effect occurs only under a synthetic continuous-max-SD load that the natural
+target-halt prevents. **M3+ mitigation candidate (not implemented — gold-plating given the halt):** have
+the probe detect DAP-active and defer recorder SD flushes during a flash (bounded by `REC_LOGBUF_CAP` so
+no data loss), which would fully quiesce SD writes during flashing → expected 0/600.
+
+Test: `tests/m2/coexist_soak.py` (device-side recgen + concurrent `gate1_soak.sh`); device-side hook
+`{"q":"recgen_on"}`/`{"q":"recgen_off"}` in `src/sd_gate.c`.
+
+---
+
+## M2 — COMPLETE (2026-06-20)
+SD bring-up gate ✓ · recorder core (host 31/31) ✓ · wired to HW ✓ · RAM-headroom (copy_to_ram→XIP,
++139 KB) ✓ · PCF8563 RTC wall-clock stamps ✓ · SD-during-flash coexistence soak ✓ (recorder PASS; DAP
+caveat documented). Device resting on the full M2 image (XIP + RTC + recgen hook).

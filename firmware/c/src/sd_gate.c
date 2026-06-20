@@ -128,6 +128,14 @@ static void do_tail_read(void) {
     s_tail_len = br;
 }
 
+// Device-side recorder load generator (HIL hook for the SD-during-flash coexistence soak). When on,
+// the SD task synthesizes recorder data every loop -> continuous f_write/f_sync to the card, with NO
+// host UART traffic. A concurrent probe-rs flash soak then measures pure SD-vs-DAP contention, without
+// the host driving both DAP and a CDC0 stream (the confound that made the host-injection version useless).
+static volatile bool s_recgen;
+static uint32_t s_recgen_seq;
+void sd_recgen_set(bool on) { s_recgen = on; }
+
 void sd_gate_task(void *ptr) {
     (void)ptr;
     run_selftest();
@@ -140,6 +148,13 @@ void sd_gate_task(void *ptr) {
         uint32_t now = (uint32_t)(time_us_64() / 1000ull);
         size_t n = uart_bridge_rec_read(drain, sizeof drain);
         if (n) recorder_feed(&g_rec, drain, n, now);
+        if (s_recgen) {   // synthetic continuous SD-write load (coexistence soak); ~107 B/iter @ ~50 Hz
+            static char gen[160];
+            int gl = snprintf(gen, sizeof gen,
+                "RECGEN %08lu the-quick-brown-fox-jumps-over-the-lazy-dog-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ\n",
+                (unsigned long)s_recgen_seq++);
+            if (gl > 0) recorder_feed(&g_rec, (const uint8_t *)gen, (size_t)gl, now);
+        }
         recorder_tick(&g_rec, now, uart_bridge_rx_last_ms(), uart_bridge_rx_ever());
         if (s_tail_req) { do_tail_read(); s_tail_req = false; }
         vTaskDelay(pdMS_TO_TICKS(20));

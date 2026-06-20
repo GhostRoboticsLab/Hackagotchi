@@ -171,6 +171,10 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   // Reliability HIL hook: exhaust the FreeRTOS heap so vApplicationMallocFailedHook fires -> crash box
   // records kind=mallocfail + reboots (directly proves the malloc-fail path, not just the shared code).
   if (!strcmp(q, "oom_test"))  { for (;;) (void) pvPortMalloc(1024); return; /* hook reboots first */ }
+  // M2 coexistence soak: device-side recorder load (continuous SD writes, no host UART traffic) so a
+  // concurrent probe-rs flash soak measures pure SD-vs-DAP contention without host USB confounds.
+  if (!strcmp(q, "recgen_on"))  { sd_recgen_set(true);  reply(itf, "{\"recgen\":1}\n"); return; }
+  if (!strcmp(q, "recgen_off")) { sd_recgen_set(false); reply(itf, "{\"recgen\":0}\n"); return; }
   // M2.4: PCF8563 RTC (I2C1 @0x51, bus-mutexed with the OLED). {"q":"time"} reads;
   // {"q":"settime","t":"YYYY-MM-DD HH:MM:SS"} sets the clock (clears the VL low-voltage flag).
   if (!strcmp(q, "time")) {

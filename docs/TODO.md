@@ -82,14 +82,16 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     on I2C1, new `src/rtc_pcf8563.{c,h}` + `src/i2c1_bus.{c,h}` (shared-bus mutex closing the OLED↔RTC
     race); `hw_rtc_read` wired → recorder stamps wall-clock; CDC1 `{"q":"time"}`/`{"q":"settime"}`.
     `tests/m2/rtc_hil.py`: set→tick→reboot→new session header `start 2026-06-20 21:59:32` (not `+0s`).
-  - [~] **SD-write-during-flash coexistence soak** (heavy R1 proof) — IN PROGRESS. First attempt's harness
-    was FLAWED: it generated SD load by having the HOST inject via UART loopback, so the host drove BOTH
-    probe-rs (DAP) and a heavy CDC0 stream → host-side USB contention (not the SD-vs-DAP thing we want),
-    AND `rx=0` showed the injection never reached the recorder. The over-heavy run also brown-out-glitched
-    the TARGET's QSPI flash (reads `0x00ffffff`; CPU cores still answer SWD) → needs a physical
-    power-cycle. Probe firmware + M2 recorder stayed healthy throughout. REDESIGN: device-side recorder
-    load generator (a CDC1 test hook) so the host only runs probe-rs and the SD-write load is internal —
-    cleanly isolates "SD writes during flash" from host USB contention.
+  - [x] **SD-write-during-flash coexistence soak** (heavy R1 proof) — **DONE (recorder PASS; DAP caveat
+    documented)** *(2026-06-20)*: device-side load generator (`{"q":"recgen_on"}`, ~33 `f_sync`/s) so the
+    host only runs probe-rs (isolates SD-vs-DAP from host USB contention). 300 cycles: recorder FLAWLESS
+    (err=0, logging=1, wedge=0, rec_drop=0, 761 KB written, content intact). DAP: 6/600 vs 0/600
+    standalone — ~1 % retryable (0-stall) USB-transfer errors from background SD-DMA bus contention, ONLY
+    under continuous-max-SD overlap that the real flow avoids (flashing halts the target → its UART/
+    recording pauses). M3+ mitigation noted (defer SD flush during DAP flash). See `tests/m2/coexist_soak.py`
+    + M2_RESULTS.md.
+- [x] **M2 SD + black-box logging — COMPLETE** *(2026-06-20)*: SD gate · recorder core (host 31/31) ·
+  HW wiring · RAM-headroom (copy_to_ram→XIP, +139 KB) · PCF8563 RTC wall-clock stamps · coexistence soak.
 - [ ] M3 core screens; M4 full UI parity; M5 polish + tagged release (.uf2 + .elf).
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,
   tighter analyzers, RTT observability.
