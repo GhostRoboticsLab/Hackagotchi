@@ -109,8 +109,12 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     returns the exact rendered text + a **show-success counter distinct from the loop counter** so a dark
     panel can't pass). Screens: PROBE/home + RECORDER (snapshot-fed). `screen_hil.py` PASS (nav, auto-cycle,
     OOB clamp no-hardfault, shows==loops climbing); operator confirmed both screens cycling; R1 re-soak 0/0.
-  - [ ] **M3.2** core screen set (Mascot/bridge home · Sniffer/live-UART · Watchdog/flight-recorder ·
-    Throughput · Clock) — all fed by published snapshots; no direct g_rec/freeze/RTC access from DASH.
+  - [x] **M3.2 full feasible screen family + cat** — **PASS, HIL-verified** *(2026-06-21)*: 6 screens —
+    HOME/mascot (the **cat** ported pixel-for-pixel: idle/blink/sleep+Z / active eyes+mouth+bubble+particles
+    / yawn) · SNIFFER (live UART tail) · RECORDER · THROUGHPUT (sparkline) · WATCHDOG (freeze-frame) · CLOCK
+    — all snapshot-fed (no direct g_rec/freeze/RTC from DASH). `screen_hil.py` PASS + live-data run (cat
+    active, sniffer streaming, throughput 2.9K/s); operator confirmed render; R1 re-soak 120cyc 0/0 rec_drop=0.
+    Dropped (pin conflict): scope/PWM/logic/I2C-scan. Deferred M4: macro/baud/SD-explorer, hex-sniffer.
   - [ ] **M3.3** buzzer/LED event feedback (wedge/SD-fault/trigger) + OPTIONAL gated probe-active + closeout.
 - [ ] M4 full UI parity (Macro/Baud/SD-explorer via CDC1+snapshot redesign); M5 polish + tagged release (.uf2 + .elf).
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,

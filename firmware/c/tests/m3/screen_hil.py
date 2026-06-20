@@ -35,21 +35,31 @@ def main():
         nonlocal ok
         print(("  OK  " if c else "  FAIL") + " " + m); ok = ok and c
 
+    # M3.2 screen order: 0 HOME(cat) · 1 SNIFFER · 2 RECORDER · 3 THROUGHPUT · 4 WATCHDOG · 5 CLOCK
     ctrl('{"q":"screen","n":0}'); time.sleep(0.5)
     sc0 = ctrl('{"q":"screen"}'); print("screen0:", sc0)
     chk(sc0.get("screen") == 0, "on screen 0")
-    chk("HACKAGOTCHI" in sc0.get("text", ""), "screen 0 = PROBE/home")
+    chk(sc0.get("n") == 6, "6 screens registered")
+    chk("HACKAGOTCHI" in sc0.get("text", ""), "screen 0 = HOME/mascot (HACKAGOTCHI)")
     sh0 = sc0.get("shows", 0)
 
     ctrl('{"q":"next"}'); time.sleep(0.5)
     sc1 = ctrl('{"q":"screen"}'); print("screen1:", sc1)
     chk(sc1.get("screen") == 1, "next -> screen 1")
-    chk("RECORDER" in sc1.get("text", ""), "screen 1 = RECORDER")
-    rec = ctrl('{"q":"rec"}')
-    chk(rec.get("file", "X") in sc1.get("text", ""), "screen 1 shows the live snapshot filename")
+    chk("UART RX LOG" in sc1.get("text", ""), "screen 1 = SNIFFER")
 
-    ctrl('{"q":"prev"}'); time.sleep(0.5)
-    chk(ctrl('{"q":"screen"}').get("screen") == 0, "prev -> screen 0")
+    ctrl('{"q":"screen","n":2}'); time.sleep(0.5)
+    sc2 = ctrl('{"q":"screen"}'); print("screen2:", sc2)
+    chk(sc2.get("screen") == 2 and "RECORDER" in sc2.get("text", ""), "screen 2 = RECORDER")
+    rec = ctrl('{"q":"rec"}')
+    chk(rec.get("file", "X") in sc2.get("text", ""), "RECORDER shows the live snapshot filename")
+
+    for nm, n, key in [("THROUGHPUT", 3, "THROUGHPUT"), ("WATCHDOG", 4, "WATCHDOG"), ("CLOCK", 5, "CLOCK")]:
+        ctrl('{"q":"screen","n":%d}' % n); time.sleep(0.5)
+        chk(key in ctrl('{"q":"screen"}').get("text", ""), f"screen {n} = {nm}")
+
+    ctrl('{"q":"screen","n":0}'); ctrl('{"q":"prev"}'); time.sleep(0.5)
+    chk(ctrl('{"q":"screen"}').get("screen") == 5, "prev from 0 wraps to last screen (5)")
 
     ctrl('{"q":"screen","n":99}'); time.sleep(0.5)
     scC = ctrl('{"q":"screen"}'); print("after n=99:", scC.get("screen"))

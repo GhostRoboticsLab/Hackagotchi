@@ -126,3 +126,41 @@ nav resets the auto-cycle clock. `{"q":"screen"}` (no n) returns the attestation
 cycle + clamp safety proven; R1 intact. M3.2 just adds screen fns to the table.
 
 Build: `BUILD_DIR=/tmp/hg-build-m31 ./build_fork.sh`. Device resting on `/tmp/hg-build-m31`.
+
+---
+
+## Increment M3.2 — full feasible screen family + cat mascot — **PASS (live, 2026-06-21)**
+
+**Falsifiable claim.** The MicroPython screen family ports faithfully onto the M3 framework — the cat
+mascot pixel-for-pixel, plus every screen the static pin map allows — all fed by the published snapshot,
+with no DAP regression despite the much heavier per-frame draw.
+
+**Ported (6 screens).** 0 HOME/mascot (brand + rx/up/REC/clock + the **cat**), 1 SNIFFER (live UART tail,
+wrapped), 2 RECORDER (black-box status), 3 THROUGHPUT (now/peak + auto-scaled **sparkline** from a
+dashboard-local 1 Hz bytes/sec ring), 4 WATCHDOG (wedge/hits/alert + freeze-frame tail), 5 CLOCK (big
+scale-2 wall-clock + date). Screen fns now draw graphics DIRECTLY (the cat/sparkline aren't text) AND fill
+the attestation text model; the show-success counter + an operator glance keep it honest.
+
+**Cat (`draw_cat`).** Ported pixel-for-pixel from main.py via the ssd1306 primitives (rect→empty_square,
+fill_rect→square, line, pixel, pixel(0)→clear_pixel, text→draw_string): head/ears/whiskers/nose, wagging
+tail (3-stage), and the three states — IDLE (blink / sleeping curved eyes + floating Z's + chest-breath),
+ACTIVE (wide eyes + pupils + moving mouth + RX bubble + flying data particles), and the IDLE→ACTIVE YAWN
+transition. "active" is derived from the snapshot (`rx_total` climbing within 2.5 s).
+
+**Intentionally absent / deferred** (recorded so it's not mistaken for an omission): Oscilloscope, PWM Lab,
+Logic Analyzer, I2C-scanner — hard pin conflicts / bus contention (can't exist). Macro/Baud/SD-explorer —
+M4 (need a CDC1-driven redesign; no button). Hex-sniffer sub-mode — needs raw tail bytes + an input
+affordance; ASCII sniffer ships now.
+
+**HIL (`tests/m3/screen_hil.py`, all OK).** 6 screens registered; nav (`next`/`prev`/`screen N`) hits each
+of HOME/SNIFFER/RECORDER/THROUGHPUT/WATCHDOG/CLOCK; `prev` from 0 wraps to 5; `screen n=99` clamped to 3
+(99%6), crashes=0; auto-cycle advances; shows≈loops climbing; dstack ~854 words free. **Live-data run**
+(recgen on): HOME cat → `cat:active`, SNIFFER shows the streaming `…quick-brown-fox…` tail, THROUGHPUT
+`now 2.9K/s pk 3.1K/s`. **Operator confirmed the cat + all screens render correctly on the panel.**
+**R1 re-soak on this build:** coexist 120 cycles, DAP 0 fails / 0 stalls, rec_drop=0 — the heavier draw
+did not regress DAP or starve the recorder.
+
+**Verdict: PASS.** The Hackagotchi dashboard is feature-complete for M3-core: a reactive cat + the full
+feasible screen set, snapshot-fed, R1-clean. (Future graphics rewrite: see `docs/hackagotchiUI_upgrade_v1.1.md`.)
+
+Build: `BUILD_DIR=/tmp/hg-build-m32 ./build_fork.sh`. Device resting on `/tmp/hg-build-m32`.
