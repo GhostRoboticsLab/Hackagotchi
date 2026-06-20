@@ -57,6 +57,7 @@
 #include "hardware/structs/usb.h"
 #include "hackagotchi_dashboard.h"   // [HACKAGOTCHI] 1/3
 #include "crash_box.h"               // [HACKAGOTCHI] M1 reliability core — post-mortem fault box
+#include "watchdog_task.h"           // [HACKAGOTCHI] M1 reliability core — SW watchdog
 
 // UART0 for debugprobe debug
 // UART1 for debugprobe to target device
@@ -81,7 +82,17 @@ static uint8_t RxDataBuffer[CFG_TUD_HID_EP_BUFSIZE];
 #endif
 #define DASHBOARD_TASK_STACK 1024
 
+// [HACKAGOTCHI] M1: the SW-watchdog health task runs at the HIGHEST app priority so it is never
+// starved (it must feed the HW WDT on time) and can preempt a wedged lower task to record the reason.
+// It sleeps ~all the time (500 ms cycle, microseconds of work), so the cost to UART/DAP is negligible.
+#define WD_TASK_PRIO (tskIDLE_PRIORITY + 3)
+
 TaskHandle_t dap_taskhandle, tud_taskhandle, mon_taskhandle;
+
+// [HACKAGOTCHI] M1: SW-watchdog heartbeat (bumped each usb_thread loop) + a HIL hook that wedges the
+// TUD task on demand so the watchdog can be proven to fire. Defined here (the TUD task's home).
+volatile uint32_t g_tud_checkin = 0;
+volatile bool     g_tud_wedge   = false;
 
 static int was_configured;
 
@@ -123,6 +134,12 @@ void usb_thread(void *ptr)
     TickType_t wake;
     wake = xTaskGetTickCount();
     do {
+        // [HACKAGOTCHI] M1: SW-watchdog heartbeat. g_tud_wedge is a HIL hook — when set, this task
+        // deliberately stops looping so the watchdog can be proven to catch a wedged TUD task.
+        if (g_tud_wedge)
+            for (;;) tight_loop_contents();
+        g_tud_checkin++;
+
         tud_task();
 #ifdef PROBE_USB_CONNECTED_LED
         if (!gpio_get(PROBE_USB_CONNECTED_LED) && tud_ready())
@@ -171,6 +188,8 @@ int main(void) {
 #endif
         // [HACKAGOTCHI] 3/3 — Gate-1 OLED coexistence harness (lowest priority, runs always).
         xTaskCreate(dashboard_task, "DASH", DASHBOARD_TASK_STACK, NULL, DASHBOARD_TASK_PRIO, &dashboard_taskhandle);
+        // [HACKAGOTCHI] M1: SW-watchdog health task (highest prio; disarmed until wd_arm over CDC1).
+        xTaskCreate(watchdog_task, "WD", configMINIMAL_STACK_SIZE, NULL, WD_TASK_PRIO, &watchdog_taskhandle);
         vTaskStartScheduler();
     }
 

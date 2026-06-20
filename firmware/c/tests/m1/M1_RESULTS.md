@@ -65,12 +65,51 @@ strict JSON); cosmetic, fix to `null` next flash. Crash box is HardFault-only by
 **Verdict: PASS** — crash box captures + survives + surfaces a fault at rank-1, with the probe
 recovering and DAP intact.
 
+---
+
+## Increment 2 — SW watchdog + self-reflash (`{"q":"bootsel"}`) — **PASS (live, 2026-06-20)**
+
+**Falsifiable claims.** (a) An ARMED software watchdog detects the high-priority TUD task wedged,
+records `kind=watchdog, task=TUD` into the crash box, and reboots the re-enumerating probe. (b)
+`{"q":"bootsel"}` drops the probe to BOOTSEL so it can be reflashed via `picotool` with **no physical
+button** — removing the dev-loop bottleneck (debugprobe has no reset interface).
+
+**Implementation** (`src/watchdog_task.{c,h}`, `src/crash_box.*`, `src/cdc1_control.c`, `src/main.c`):
+- SW watchdog at the HIGHEST app priority (`tskIDLE+3`) so it is never starved and can preempt a
+  wedged lower task. Monitors the **TUD** task via a heartbeat counter `g_tud_checkin` bumped each
+  `usb_thread` loop — deliberately NOT a low-prio task (which legitimately starves under flash load →
+  would false-reset mid-flash). Stall window 4 s; HW WDT 8 s backstops the watchdog task itself dying.
+- **Disarmed by default**: the HW WDT is not enabled until `{"q":"wd_arm"}` — a fresh flash cannot
+  reboot-loop. On a caught stall → `crash_box_record_watchdog()` (new `CRASH_WATCHDOG` kind) → reboot.
+- `{"q":"bootsel"}` → `reset_usb_boot(0,0)`. `{"q":"wd_test"}` sets `g_tud_wedge` so `usb_thread`
+  self-wedges (HIL hook). `status` gains `wd_armed`; `lastfault` clean state is now valid JSON (`null`).
+
+**Machine assertions** (both can fail): `tests/m1/watchdog_hil.py` (arm → wedge → assert
+re-enumeration + `kind=watchdog/task=TUD` + count+1 + disarmed-after); the bootsel autonomy loop
+(send `bootsel` → confirm BOOTSEL → `picotool load` with no button → device responds).
+
+**Result (live).**
+```
+watchdog: [baseline wd_armed=0] arm -> wd_armed=1 -> wd_test (wedge TUD)
+          -> reboot (up/n reset) -> lastfault {"kind":"watchdog","count":2,"task":"TUD"}, crashes 1->2,
+          wd_armed back to 0 -> PASS
+crashbox regression on this image: hardfault captured, count 2->3 -> PASS
+bootsel:  {"q":"bootsel"} -> dropped to BOOTSEL (picotool reachable, no serial) -> picotool load -x
+          (NO button) -> device boots, status responds, probe-rs binds "Hackagotchi Probe (CMSIS-DAP)"
+          -> PASS  (dev loop now hands-free)
+```
+
+**Disclosed (not blockers).** Watchdog ships disarmed (a dev/test state until proven non-false-positive
+under real flash load → then flip default-on). Only TUD is monitored so far (DAP/UART/DASH check-ins
+deferred — DAP needs an upstream-task overlay; DASH would false-positive on priority starvation). The
+`bootsel` command only helps when firmware is alive enough to service CDC1; a pre-USB-enum fault still
+needs the physical button (see `docs/recovery-model.md`).
+
+**Verdict: PASS** — watchdog catches a wedged task at rank-1; the probe is now self-reflashable.
+
 ### Remaining in M1 (next increments)
-- **SW-watchdog task** — per-task check-in counters; a low-prio task feeds the lone HW WDT only when
-  ALL monitored tasks checked in on time → a wedged task reboots the probe (into the crash box).
-  Needs its own HIL test (wedge a task → confirm reset; confirm no spurious resets in normal run).
-- **`{"q":"bootsel"}`** CDC1 command (`reset_usb_boot`) — lets the probe be reflashed on demand
-  without a manual BOOTSEL, removing the dev-loop bottleneck (one manual BOOTSEL needed to deploy it).
 - jsmn line-buffered parser replacing `strstr`; `next`/`prev`/`dump`; bounded SPSC UART bridge;
   per-interface USB string descriptors (stable CDC0=UART / CDC1=Control naming).
 - error-code + goto-cleanup idiom adopted for new code.
+- Watchdog hardening: characterise DAP/UART/DASH cadence under flash load, then monitor them + flip
+  the watchdog to armed-by-default.
