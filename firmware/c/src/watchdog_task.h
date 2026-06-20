@@ -38,5 +38,6 @@ extern volatile bool     g_tud_wedge;    // HIL: set -> usb_thread self-wedges s
 // disarm — only a reboot returns to the (also-armed) default.
 void wd_arm(void);
 bool wd_is_armed(void);
+uint32_t wd_max_gap_ms(void);  // worst-case observed TUD stall (peak since_ms); 0 = never missed a window
 
 #endif // HACKAGOTCHI_WATCHDOG_TASK_H

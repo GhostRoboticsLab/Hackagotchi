@@ -28,7 +28,9 @@ this build (an old image has no `crashes` field → the test FAILs fast on the w
   the 8-word exception frame `[r0..r3,r12,lr,pc,xpsr]`.
 - Record lives in `.uninitialized_data` (NOLOAD) — **verified** outside `[__bss_start__,__bss_end__]`
   so crt0 never zeroes it and the `copy_to_ram` bootrom load never overwrites it → survives a
-  watchdog reboot. Mirrored into the RP2040 watchdog scratch registers as a guaranteed cross-check.
+  watchdog reboot. Also mirrored into the RP2040 watchdog scratch registers (readable by a
+  debugger/picotool for external inspection — same warm-reset survival as `.uninitialized_data`, not an
+  independent survival path).
 - The two FreeRTOS hooks (`configCHECK_FOR_STACK_OVERFLOW=2`, `configUSE_MALLOC_FAILED_HOOK=1` — both
   already enabled upstream) now route into the same box instead of a bare `panic()` (and the upstream
   `*pcTaskName` `%s` bug is fixed in passing).
@@ -81,7 +83,7 @@ records `kind=watchdog, task=TUD` into the crash box, and reboots the re-enumera
 button** — removing the dev-loop bottleneck (debugprobe has no reset interface).
 
 **Implementation** (`src/watchdog_task.{c,h}`, `src/crash_box.*`, `src/cdc1_control.c`, `src/main.c`):
-- SW watchdog at the HIGHEST app priority (`tskIDLE+3`) so it is never starved and can preempt a
+- SW watchdog at the top priority tier (`tskIDLE+3`, tied with the UART bridge, above TUD/DAP/DASH) so it is never starved and can preempt a
   wedged lower task. Monitors the **TUD** task via a heartbeat counter `g_tud_checkin` bumped each
   `usb_thread` loop — deliberately NOT a low-prio task (which legitimately starves under flash load →
   would false-reset mid-flash). Stall window 4 s; HW WDT 8 s backstops the watchdog task itself dying.
@@ -256,22 +258,41 @@ stack → ENXIO; fix = static buffers + bigger stack).
 **Plan reconciliations (intentional deviations from `docs/engineering-plan.md`):**
 - **Priority order:** the plan §4.1 sketches TinyUSB > UART-bridge; the fork keeps upstream debugprobe's
   **UART-bridge (+3) > TUD (+2) > DAP (+1) > dashboard (+0)** (UART must preempt USB or bytes are lost).
-  The watchdog being above this whole stack and monitoring TUD is unchanged. (Noted in
+  The watchdog being at the top tier (= UART bridge, above TUD/DAP/DASH) and monitoring TUD is unchanged. (Noted in
   `docs/firmware-conventions.md` §2.)
 - **Ceedling/Unity host-test CI:** the plan wants a host-test CI job; M1 ships a host test
   (`ring_test.c`, run via `cc`) but not yet a Ceedling CI job — it lands with **M2**, when the
   log-rotation / wedge-detector logic gives it more to cover.
 
-**Disclosed deferrals (carried to M2+, not blockers):** high-baud burst-loss A/B not run (no fast UART
-source on the bench; the IRQ architecture prevents it by construction); DAP/UART/DASH not individually
-watchdog-monitored (TUD-keystone is the correct signal — DASH is starvable by design, UART is
-suspendable, DAP is upstream; per-DAP-progress monitoring is a possible M2 refinement); the soak left
-the target Pico W holding `blink_a.elf` (it's the test mule / M2 SWD target — restore PicoInky if a
-dashboard mule is wanted).
+**Run evidence:** machine-captured logs in `tests/m1/logs/*.log` (gitignored, regenerated on hardware —
+mirrors the gate convention), not just the inline transcripts.
 
-**Audit:** an adversarial 3-lens audit (`audit-m1-complete`) flagged the above as test-rigor/doc
-issues (no missing deliverables); all were addressed — soak strengthened (concurrent TUD+DAP load,
-no-op rejected), `urx_hw` demoted to corroborating (round-trip is the per-run rank-1 signal), crash-box
-PC range-checked, "soak-proven" → "priority-argued + soak-corroborated", disarmed→armed docs reconciled.
+**Disclosed deferrals (carried to M2+, not blockers):**
+- high-baud burst-loss A/B not run (no fast UART source on the bench; the IRQ architecture prevents it
+  by construction); on-hardware ring-overflow (urx_drop>0) not force-tested (host `ring_test.c` proves
+  the drop accounting deterministically; same `spsc_push` runs on-device).
+- DAP/UART/DASH not individually watchdog-monitored (TUD-keystone is the correct signal — DASH is
+  starvable by design, UART is suspendable, DAP is upstream; per-DAP-progress monitoring is a possible
+  M2 refinement). The SW watchdog proves the `usb_thread` loop + `tud_task()` return liveness; the
+  upstream **dev_mon** task (SOF watchdog, `tud_deinit/tud_init`) covers a logically-stalled-but-returning
+  USB stack — the two are complementary.
+- stack-overflow hook NOT force-triggered: a clean `kind=stackoverflow` capture is unreliable on M0+
+  (deep recursion tends to HardFault before the canary check runs on a context switch); the hook is
+  wired + artifact-verified and shares the exact `record_common→reboot` path proven by the HardFault
+  AND the now-directly-triggered `mallocfail` (`oom_test`). malloc-fail covers the FreeRTOS-hook path.
+- SPSC ring uses `volatile` indices + standalone release/acquire fences (correct + hardware-proven on
+  single-core M0+, and exercised by the 4 M-op concurrent host stress on weakly-ordered arm64). A full
+  ThreadSanitizer-clean run would want C11 `_Atomic` indices — a noted future hardening.
+- the soak left the target Pico W holding `blink_a.elf` (it's the test mule / M2 SWD target — restore
+  PicoInky if a dashboard mule is wanted).
+
+**Audit (two rounds, `audit-m1-complete`):** both rounds returned the plan + code-consistency lenses
+COMPLETE and only the test-rigor lens INCOMPLETE — i.e. no missing deliverables, only evidence gaps,
+all now closed. Round 1: tautological soak, stale-peak `urx_hw`, "soak-proven" overclaim,
+disarmed↔armed doc drift. Round 2: `ring_test.c` assert()/NDEBUG silent-pass (HIGH) → CHECK-macro +
+verify-the-verifier; ring concurrency untested → 4 M-op threaded fence stress; soak margin unmeasured →
+`wd_gap` measured (500 ms ≪ 4000 ms); fragmentation possibly unexercised → `frag` counter asserted;
+mallocfail path → `oom_test` directly triggers it; dev_mon/heartbeat semantics disclosed; run-logs
+saved. (Discipline: accept the verdict, fix the substance, re-run the audit — not rationalize.)
 
 **Cleared to start M2** (SD + black-box logging — the recorder drains the same `spsc_ring`).

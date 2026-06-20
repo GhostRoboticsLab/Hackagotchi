@@ -53,6 +53,11 @@
 // M3 dashboard will consume it to pick a screen. Echoed in every reply so a host can drive nav now.
 static int s_page = 0;
 
+// Count of rx-callbacks that ended holding a partial line (= a request spanned >1 USB packet and the
+// line buffer reassembled it). Exposed as `frag` so the HIL fragmentation test can prove the
+// reassembly path actually ran, instead of trusting host-side packetization timing.
+static uint32_t s_partial = 0;
+
 static void reply(uint8_t itf, const char *s) {
   tud_cdc_n_write(itf, s, (uint32_t) strlen(s));
   tud_cdc_n_write_flush(itf);
@@ -68,15 +73,16 @@ static void write_status(uint8_t itf) {
   int len = snprintf(r, sizeof r,
                      "{\"fw\":\"Hackagotchi\",\"heap\":%u,\"up\":%u,\"n\":%u,"
                      "\"stall_cfg\":%d,\"stall_us\":%u,\"prio\":%d,"
-                     "\"crashes\":%u,\"wd_armed\":%d,\"page\":%d,"
-                     "\"urx_drop\":%u,\"urx_hw\":%u,\"utx_drop\":%u}\n",
+                     "\"crashes\":%u,\"wd_armed\":%d,\"wd_gap\":%u,\"page\":%d,"
+                     "\"urx_drop\":%u,\"urx_hw\":%u,\"utx_drop\":%u,\"frag\":%u}\n",
                      (unsigned) xPortGetFreeHeapSize(),
                      (unsigned) (time_us_64() / 1000000ull),
                      (unsigned) g_dash_counter, (int) ADVERSARIAL_STALL_MS,
                      (unsigned) g_dash_stall_us, (int) HACKA_DASH_PRIO,
-                     (unsigned) crash_box_count(), (int) wd_is_armed(), s_page,
+                     (unsigned) crash_box_count(), (int) wd_is_armed(), (unsigned) wd_max_gap_ms(),
+                     s_page,
                      (unsigned) uart_bridge_drops(), (unsigned) uart_bridge_highwater(),
-                     (unsigned) cdc_uart_tx_overflow());
+                     (unsigned) cdc_uart_tx_overflow(), (unsigned) s_partial);
   if (len > 0) reply(itf, r);
 }
 
@@ -139,6 +145,9 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   // UART-bridge HIL self-test: PL011 internal loopback (TX->RX in-chip) — round-trip CDC0 with no jumper.
   if (!strcmp(q, "uloop_on"))  { uart_bridge_set_loopback(PROBE_UART_INTERFACE, true);  reply(itf, "{\"uloop\":1}\n"); return; }
   if (!strcmp(q, "uloop_off")) { uart_bridge_set_loopback(PROBE_UART_INTERFACE, false); reply(itf, "{\"uloop\":0}\n"); return; }
+  // Reliability HIL hook: exhaust the FreeRTOS heap so vApplicationMallocFailedHook fires -> crash box
+  // records kind=mallocfail + reboots (directly proves the malloc-fail path, not just the shared code).
+  if (!strcmp(q, "oom_test"))  { for (;;) (void) pvPortMalloc(1024); return; /* hook reboots first */ }
 
   reply(itf, "{\"err\":\"unknown\"}\n");
 }
@@ -167,4 +176,5 @@ void tud_cdc_rx_cb(uint8_t itf) {
       }
     }
   }
+  if (llen > 0) s_partial++;  // ended holding a partial line -> a request spanned >1 packet
 }
