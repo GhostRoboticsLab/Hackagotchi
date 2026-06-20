@@ -39,5 +39,6 @@ extern volatile bool     g_tud_wedge;    // HIL: set -> usb_thread self-wedges s
 void wd_arm(void);
 bool wd_is_armed(void);
 uint32_t wd_max_gap_ms(void);  // worst-case observed TUD stall (peak since_ms); 0 = never missed a window
+void wd_gap_reset(void);       // zero the peak (so a soak measures only its own run, not the boot floor)
 
 #endif // HACKAGOTCHI_WATCHDOG_TASK_H

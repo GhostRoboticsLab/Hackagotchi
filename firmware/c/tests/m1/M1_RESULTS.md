@@ -225,10 +225,14 @@ absence of a false-fire margin — it corroborates.) Verified **both directions*
 armed-by-default build:
 - FIRES on a real wedge — `watchdog_hil.py` (wd_armed=1 at boot, no manual arm; wd_test wedges TUD →
   `kind=watchdog/task=TUD` → reboot → wd_armed=1 again).
-- Does NOT false-fire under load — `watchdog_soak.py` (strengthened to load the MONITORED task: a
-  background DAP flash thread **and** a concurrent CDC0 loopback firehose hammering TUD; no-op runs are
-  rejected by requiring real flashes): **120 flashes [0 failed] + 44 KB CDC firehose, `up` 41→122
-  monotonic, `crashes` steady at 9, `wd_armed` held 1.** (Also a heavy DAP↔CDC coexistence pass.)
+- Does NOT false-fire under load — `watchdog_soak.py`. It resets the stall peak (`wd_reset`), then runs
+  a background DAP flash thread **and** a concurrent CDC0 firehose, and gates on three device-sourced
+  signals: (i) the **TUD heartbeat advanced +1.65 M** — positive proof the load genuinely reached the
+  MONITORED task (not idle); (ii) `up` monotonic + `crashes` steady — no false-fire; (iii) **`wd_gap`
+  stayed 0 ms *since reset*** — TUD never missed a 500 ms window under load ≪ the 4000 ms threshold.
+  Live (`logs/watchdog_soak.log`): 118 flashes [0 failed] + 41 KB firehose, up 55→137. (Also a heavy
+  DAP↔CDC coexistence pass.) NB: `wd_gap` is reset-relative + paired with the heartbeat-advance gate —
+  the raw peak is otherwise a stale boot-latched value and must not be used as a standalone margin.
 
 **(d) Error-code + goto-cleanup idiom** — codified as the project convention in
 `docs/firmware-conventions.md` (M1 modules are single-resource/early-return; the full idiom earns its
@@ -286,13 +290,15 @@ mirrors the gate convention), not just the inline transcripts.
 - the soak left the target Pico W holding `blink_a.elf` (it's the test mule / M2 SWD target — restore
   PicoInky if a dashboard mule is wanted).
 
-**Audit (two rounds, `audit-m1-complete`):** both rounds returned the plan + code-consistency lenses
-COMPLETE and only the test-rigor lens INCOMPLETE — i.e. no missing deliverables, only evidence gaps,
-all now closed. Round 1: tautological soak, stale-peak `urx_hw`, "soak-proven" overclaim,
-disarmed↔armed doc drift. Round 2: `ring_test.c` assert()/NDEBUG silent-pass (HIGH) → CHECK-macro +
-verify-the-verifier; ring concurrency untested → 4 M-op threaded fence stress; soak margin unmeasured →
-`wd_gap` measured (500 ms ≪ 4000 ms); fragmentation possibly unexercised → `frag` counter asserted;
-mallocfail path → `oom_test` directly triggers it; dev_mon/heartbeat semantics disclosed; run-logs
-saved. (Discipline: accept the verdict, fix the substance, re-run the audit — not rationalize.)
+**Audit (three rounds, `audit-m1-complete`):** every round returned the plan + code-consistency lenses
+COMPLETE and only test-rigor INCOMPLETE — no missing deliverables, only evidence gaps, all now closed.
+Round 1: tautological soak, stale-peak `urx_hw`, "soak-proven" overclaim, disarmed↔armed doc drift.
+Round 2: `ring_test.c` assert()/NDEBUG silent-pass (HIGH) → CHECK-macro + verify-the-verifier; ring
+concurrency untested → 4 M-op threaded fence stress; fragmentation → `frag` counter asserted; mallocfail
+→ `oom_test` directly triggers it. Round 3 (caught an OVERCORRECTION from round 2): the new `wd_gap`
+"margin" gate was itself a stale boot-latched peak — the very defect round 1 demoted `urx_hw` for, HIGH
+→ fixed with `wd_reset` + a positive TUD-heartbeat-advance gate (load provably reached the monitored
+task) + reset-relative `wd_gap`; plus uptime-reset reboot witness + wd_arm reply asserted. (Discipline:
+accept the verdict, fix the substance, re-run — even when the fix exposes your own earlier fix's flaw.)
 
 **Cleared to start M2** (SD + black-box logging — the recorder drains the same `spsc_ring`).

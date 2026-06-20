@@ -73,14 +73,14 @@ static void write_status(uint8_t itf) {
   int len = snprintf(r, sizeof r,
                      "{\"fw\":\"Hackagotchi\",\"heap\":%u,\"up\":%u,\"n\":%u,"
                      "\"stall_cfg\":%d,\"stall_us\":%u,\"prio\":%d,"
-                     "\"crashes\":%u,\"wd_armed\":%d,\"wd_gap\":%u,\"page\":%d,"
+                     "\"crashes\":%u,\"wd_armed\":%d,\"wd_gap\":%u,\"tud\":%u,\"page\":%d,"
                      "\"urx_drop\":%u,\"urx_hw\":%u,\"utx_drop\":%u,\"frag\":%u}\n",
                      (unsigned) xPortGetFreeHeapSize(),
                      (unsigned) (time_us_64() / 1000000ull),
                      (unsigned) g_dash_counter, (int) ADVERSARIAL_STALL_MS,
                      (unsigned) g_dash_stall_us, (int) HACKA_DASH_PRIO,
                      (unsigned) crash_box_count(), (int) wd_is_armed(), (unsigned) wd_max_gap_ms(),
-                     s_page,
+                     (unsigned) g_tud_checkin, s_page,
                      (unsigned) uart_bridge_drops(), (unsigned) uart_bridge_highwater(),
                      (unsigned) cdc_uart_tx_overflow(), (unsigned) s_partial);
   if (len > 0) reply(itf, r);
@@ -140,6 +140,7 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   if (!strcmp(q, "lastfault")) { write_lastfault(itf); return; }
   if (!strcmp(q, "dump"))      { write_status(itf); write_lastfault(itf); return; }
   if (!strcmp(q, "wd_arm"))    { wd_arm(); reply(itf, "{\"wd\":\"armed\"}\n"); return; }
+  if (!strcmp(q, "wd_reset"))  { wd_gap_reset(); reply(itf, "{\"wd_gap\":0}\n"); return; }
   if (!strcmp(q, "next"))      { s_page++; write_page(itf); return; }
   if (!strcmp(q, "prev"))      { if (s_page > 0) s_page--; write_page(itf); return; }
   // UART-bridge HIL self-test: PL011 internal loopback (TX->RX in-chip) — round-trip CDC0 with no jumper.
