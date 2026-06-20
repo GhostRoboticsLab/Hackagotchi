@@ -16,6 +16,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>   // atoi (numeric jsmn values for beep/led test commands)
 #include <stdbool.h>
 #include <pico/stdlib.h>
 
@@ -35,6 +36,7 @@
 #include "uart_bridge.h"            // uart ring stats + loopback toggle (CDC0 bridge HIL test)
 #include "sd_gate.h"                // M2: SD bring-up self-test result ({"q":"sd"})
 #include "rtc_pcf8563.h"            // M2.4: PCF8563 RTC read/set ({"q":"time"} / {"q":"settime"})
+#include "feedback.h"               // M3.0: LED/buzzer HW-reconciliation test commands
 
 // Build-discriminating tags compiled into the status reply so the RUNNING firmware proves its OWN
 // identity (closes the Gate-1 provenance gap). Mirror the CMake -D flags (PRIVATE on the target).
@@ -136,6 +138,18 @@ static bool get_str(const char *js, const jsmntok_t *tok, int ntok,
   return false;
 }
 
+// Read the integer value of top-level key `key` (a jsmn PRIMITIVE number). atoi() stops at the token's
+// trailing delimiter (the value isn't NUL-terminated in `js`, but ',' / '}' bounds it). Returns true iff found.
+static bool get_int(const char *js, const jsmntok_t *tok, int ntok, const char *key, int *out) {
+  for (int i = 1; i + 1 < ntok; i++) {
+    if (tok_eq(js, &tok[i], key) && tok[i + 1].type == JSMN_PRIMITIVE) {
+      *out = atoi(js + tok[i + 1].start);
+      return true;
+    }
+  }
+  return false;
+}
+
 // Parse + dispatch one complete JSON request line.
 static void handle_line(uint8_t itf, const char *line, int len) {
   jsmn_parser p;
@@ -175,6 +189,28 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   // concurrent probe-rs flash soak measures pure SD-vs-DAP contention without host USB confounds.
   if (!strcmp(q, "recgen_on"))  { sd_recgen_set(true);  reply(itf, "{\"recgen\":1}\n"); return; }
   if (!strcmp(q, "recgen_off")) { sd_recgen_set(false); reply(itf, "{\"recgen\":0}\n"); return; }
+  // M3.0 HW-reconciliation: drive the buzzer (GP29) + status LEDs (GP17 red / GP16 green) to confirm the
+  // outputs work post-SWD-remap. Non-blocking (the SD task's feedback_service does the actual drive/dwell).
+  // {"q":"beep","hz":2000,"ms":120}  /  {"q":"led","r":1,"g":0}
+  if (!strcmp(q, "beep")) {
+    int hz = 2000, ms = 120; get_int(line, tok, n, "hz", &hz); get_int(line, tok, n, "ms", &ms);
+    feedback_beep((uint16_t)(hz < 0 ? 0 : hz), (uint16_t)(ms < 0 ? 0 : ms));
+    char r[40]; snprintf(r, sizeof r, "{\"beep\":%d,\"ms\":%d}\n", hz, ms); reply(itf, r); return;
+  }
+  if (!strcmp(q, "led")) {
+    int rr = 0, gg = 0; get_int(line, tok, n, "r", &rr); get_int(line, tok, n, "g", &gg);
+    feedback_led(rr != 0, gg != 0);
+    char r[32]; snprintf(r, sizeof r, "{\"led_r\":%d,\"led_g\":%d}\n", rr ? 1 : 0, gg ? 1 : 0); reply(itf, r); return;
+  }
+  // {"q":"pixel","r":0..255,"g":..,"b":..} — drive the NeoPixel to an arbitrary colour (HW-reconcile/test).
+  if (!strcmp(q, "pixel")) {
+    int rr = 0, gg = 0, bb = 0;
+    get_int(line, tok, n, "r", &rr); get_int(line, tok, n, "g", &gg); get_int(line, tok, n, "b", &bb);
+    #define CLAMP8(v) ((uint8_t)((v) < 0 ? 0 : (v) > 255 ? 255 : (v)))
+    feedback_pixel(CLAMP8(rr), CLAMP8(gg), CLAMP8(bb));
+    #undef CLAMP8
+    char r[48]; snprintf(r, sizeof r, "{\"pixel\":[%d,%d,%d]}\n", rr, gg, bb); reply(itf, r); return;
+  }
   // M2.4: PCF8563 RTC (I2C1 @0x51, bus-mutexed with the OLED). {"q":"time"} reads;
   // {"q":"settime","t":"YYYY-MM-DD HH:MM:SS"} sets the clock (clears the VL low-voltage flag).
   if (!strcmp(q, "time")) {

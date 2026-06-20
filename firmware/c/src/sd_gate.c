@@ -20,6 +20,7 @@
 #include "recorder.h"
 #include "uart_bridge.h"
 #include "rtc_pcf8563.h"   // M2.4: PCF8563 wall-clock for log stamps
+#include "feedback.h"      // M3.0: non-blocking LED/buzzer service (serviced from this low-prio task)
 
 TaskHandle_t sd_gate_taskhandle;
 
@@ -136,6 +137,53 @@ static volatile bool s_recgen;
 static uint32_t s_recgen_seq;
 void sd_recgen_set(bool on) { s_recgen = on; }
 
+// ---- M3 published recorder snapshot (single-writer seqlock; see sd_gate.h) ----
+// Writer = THIS task only (publish_snapshot, once per loop after recorder_tick, when g_rec is internally
+// consistent). Readers = the dashboard render loop + the CDC1 {"q":"rec"} reply. seq is even when stable,
+// odd while being written; a reader retries until it copies across a stable, unchanged seq. The fences
+// are belt-and-braces (the real protection on single-core RP2040 is the seq-retry against preemption).
+static volatile uint32_t s_snap_seq = 0;
+static rec_snapshot_t    s_snap;            // the published copy
+static rtc_dt_t          s_rtc_cache;       // wall-clock cached here (~1 Hz) so the dashboard never
+static bool              s_rtc_valid = false;  //   takes the i2c1 bus for time — only the OLED show does
+static uint32_t          s_rtc_poll_ms = 0;
+
+static void publish_snapshot(void) {
+    rec_snapshot_t s;
+    memset(&s, 0, sizeof s);
+    if (s_mounted) {   // recorder_init/start only ran if mounted; g_rec.hw is NULL otherwise
+        recorder_status_t st;
+        recorder_get_status(&g_rec, &st);                       // SAFE: this IS the owning task
+        s.logging  = st.logging;  s.wedge   = st.wedge;
+        s.rx_total = st.rx_total; s.hits    = st.hits;
+        s.tp_peak  = st.tp_peak;  s.last_err = (int)st.last_err;
+        snprintf(s.file, sizeof s.file, "%s", st.log_file);     // bounded copy, not a live pointer
+        recorder_copy_tail(&g_rec, sizeof s.tail - 1, s.tail, sizeof s.tail);
+    }
+    s.sd_mounted = s_mounted;
+    s.rec_drop   = uart_bridge_rec_drops();
+    snprintf(s.alert, sizeof s.alert, "%s", s_alert);
+    s.rtc_valid  = s_rtc_valid;  s.rtc = s_rtc_cache;
+
+    s_snap_seq++;                              // -> odd (write in progress)
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    s_snap = s;
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    s_snap_seq++;                              // -> even (stable)
+}
+
+bool dash_get_rec_snapshot(rec_snapshot_t *out) {
+    for (int tries = 0; tries < 16; tries++) {
+        uint32_t s1 = s_snap_seq;
+        if (s1 & 1u) continue;                 // writer mid-update
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        *out = s_snap;
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        if (s1 == s_snap_seq) return true;     // unchanged across the copy
+    }
+    return false;
+}
+
 void sd_gate_task(void *ptr) {
     (void)ptr;
     run_selftest();
@@ -157,6 +205,16 @@ void sd_gate_task(void *ptr) {
         }
         recorder_tick(&g_rec, now, uart_bridge_rx_last_ms(), uart_bridge_rx_ever());
         if (s_tail_req) { do_tail_read(); s_tail_req = false; }
+        // M3: cache the wall-clock here (~1 Hz) so the dashboard renders time with ZERO i2c1 access —
+        // only the OLED show takes the bus, keeping the i2c1 contenders at two (no extra RTC reader).
+        if (now - s_rtc_poll_ms >= 1000u) {
+            s_rtc_poll_ms = now;
+            rtc_dt_t dt;
+            if (rtc_pcf8563_read(&dt)) { s_rtc_cache = dt; s_rtc_valid = true; }
+            else s_rtc_valid = false;
+        }
+        publish_snapshot();          // M3: hand the dashboard + CDC1 a consistent copy of recorder state
+        feedback_service(now);       // M3.0: drive the non-blocking buzzer-off + LEDs off the hot path
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
@@ -170,14 +228,18 @@ void sd_gate_status_json(char *out, unsigned outsz) {
 }
 
 void sd_rec_status_json(char *out, unsigned outsz) {
-    recorder_status_t st;
-    recorder_get_status(&g_rec, &st);
+    // M3: read the SD-task-published snapshot, NOT g_rec directly. The old version called
+    // recorder_get_status(&g_rec) from the TUD task — handing out a live pointer into g_rec.filename
+    // (rewritten by recorder_start mid-snprintf -> torn/unterminated read) and calling hw->sd_mounted()
+    // off the owning task. The snapshot closes that race for both this reply and the dashboard.
+    rec_snapshot_t s;
+    if (!dash_get_rec_snapshot(&s)) { snprintf(out, outsz, "{\"err\":\"busy\"}\n"); return; }
     snprintf(out, outsz,
              "{\"logging\":%d,\"file\":\"%s\",\"rx\":%u,\"wedge\":%d,\"hits\":%u,"
              "\"err\":%d,\"tp_peak\":%u,\"rec_drop\":%u,\"alert\":\"%s\"}\n",
-             (int)st.logging, st.log_file, (unsigned)st.rx_total, (int)st.wedge,
-             (unsigned)st.hits, (int)st.last_err, (unsigned)st.tp_peak,
-             (unsigned)uart_bridge_rec_drops(), s_alert);
+             (int)s.logging, s.file, (unsigned)s.rx_total, (int)s.wedge,
+             (unsigned)s.hits, s.last_err, (unsigned)s.tp_peak,
+             (unsigned)s.rec_drop, s.alert);
 }
 
 void sd_rec_tail_request(void) { s_tail_req = true; }

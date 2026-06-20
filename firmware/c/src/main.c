@@ -60,6 +60,7 @@
 #include "watchdog_task.h"           // [HACKAGOTCHI] M1 reliability core — SW watchdog
 #include "sd_gate.h"                 // [HACKAGOTCHI] M2 — SD bring-up gate (low-prio SD/FatFs task)
 #include "i2c1_bus.h"                // [HACKAGOTCHI] M2 — shared I2C1 (OLED + PCF8563 RTC), bus mutex
+#include "feedback.h"               // [HACKAGOTCHI] M3.0 — status LEDs + buzzer (non-blocking HAL)
 
 // UART0 for debugprobe debug
 // UART1 for debugprobe to target device
@@ -198,6 +199,10 @@ int main(void) {
     // [HACKAGOTCHI] M2: bring up the shared I2C1 bus + its mutex ONCE here, before any task runs, so the
     // DASH (OLED) and SD (PCF8563 RTC) tasks can both lock it safely from the first tick.
     i2c1_bus_init();
+
+    // [HACKAGOTCHI] M3.0: bring up the status LEDs (GP17/GP16) + buzzer (GP29) silent/off. The actual
+    // beep/LED drive is serviced non-blocking from the low-prio SD task (feedback_service), off the DAP path.
+    feedback_init();
 
     if (THREADED) {
         xTaskCreate(usb_thread, "TUD", TUD_TASK_STACK, NULL, TUD_TASK_PRIO, &tud_taskhandle);

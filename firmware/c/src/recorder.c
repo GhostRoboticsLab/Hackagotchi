@@ -213,3 +213,7 @@ void recorder_get_status(const recorder_t *r, recorder_status_t *out) {
     out->tp_peak    = r->tp_peak;
     out->rx_total   = r->rx_total;
 }
+
+void recorder_copy_tail(const recorder_t *r, size_t k, char *out, size_t outsz) {
+    freeze_read_last(r, k, out, outsz);  // public alias; owning task only (see header)
+}

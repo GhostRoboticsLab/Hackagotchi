@@ -71,6 +71,7 @@ add_executable(hackagotchi_probe
         ${CMAKE_CURRENT_LIST_DIR}/src/recorder.c             # M2: black-box recorder core (host-tested)
         ${CMAKE_CURRENT_LIST_DIR}/src/i2c1_bus.c             # M2.4: shared I2C1 bus + mutex (OLED + RTC)
         ${CMAKE_CURRENT_LIST_DIR}/src/rtc_pcf8563.c          # M2.4: PCF8563 RTC for log wall-clock stamps
+        ${CMAKE_CURRENT_LIST_DIR}/src/feedback.c             # M3.0: status LEDs (GP17/16) + buzzer (GP29) HAL
         # --- pristine upstream debugprobe sources ---
         ${UPSTREAM}/src/probe_config.c
         ${UPSTREAM}/src/probe.c
@@ -104,6 +105,8 @@ target_compile_options(hackagotchi_probe PRIVATE -Wall)
 # PIO headers (probe.pio.h / probe_oen.pio.h) — generated from the pristine upstream PIO.
 pico_generate_pio_header(hackagotchi_probe ${UPSTREAM}/src/probe.pio)
 pico_generate_pio_header(hackagotchi_probe ${UPSTREAM}/src/probe_oen.pio)
+# M3.0: WS2812 NeoPixel status LED (pio1; SWD owns pio0). Vendored from pico-examples (BSD-3).
+pico_generate_pio_header(hackagotchi_probe ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
 
 target_compile_definitions(hackagotchi_probe PRIVATE
         BOARD_HACKAGOTCHI=1
@@ -123,6 +126,7 @@ target_link_libraries(hackagotchi_probe PRIVATE
         hardware_pio
         hardware_irq            # M1 uart_bridge: RX IRQ handler
         hardware_i2c            # OLED coexistence task
+        hardware_pwm            # M3.0 feedback: buzzer tone on GP29
         hardware_watchdog       # M1 crash box: watchdog_reboot + scratch-register mirror; SW watchdog
         pico_bootrom            # M1: reset_usb_boot for the {"q":"bootsel"} self-reflash command
         FreeRTOS-Kernel

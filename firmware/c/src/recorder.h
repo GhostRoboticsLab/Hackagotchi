@@ -109,4 +109,10 @@ void recorder_tick(recorder_t *r, uint32_t now_ms, uint32_t rx_last_ms, bool rx_
 
 void recorder_get_status(const recorder_t *r, recorder_status_t *out);
 
+// Copy the freeze ring's last `k` bytes in order (newlines->spaces, non-printable->'.') into out[]
+// (NUL-terminated). For the M3 dashboard's live-UART tail view — but called ONLY by the recorder-owning
+// task (the snapshot publisher), never cross-task against a live recorder_t (the ring is mutated by
+// recorder_feed; reading it off-task would race the producer wrapping it).
+void recorder_copy_tail(const recorder_t *r, size_t k, char *out, size_t outsz);
+
 #endif // HACKAGOTCHI_RECORDER_H

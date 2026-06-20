@@ -1,0 +1,84 @@
+# M3 — OLED dashboard / UI port: results
+
+M3 turns the device into the **Hackagotchi dashboard**: the Gate-1 OLED coexistence harness
+(`src/hackagotchi_dashboard.c`) becomes a multi-screen renderer driven entirely by single-writer
+published snapshots — never touching the recorder/RTC state another task owns (the M2 two-ring rule
+applied to the read direction). Gates-first, same discipline as M0–M2 (`../m2/M2_RESULTS.md`,
+`docs/mcu-bringup-playbook.md`).
+
+**Design of record:** the adversarially-critiqued `m3-design` workflow (3 parallel deep-reads + 1
+skeptic). Verdict: CONDITIONAL GO. Screen triage (against the LOCKED static pin map): drop the 3 hard
+pin-conflict screens (Oscilloscope = ADC on GP26/SWCLK; PWM Lab = GP28/SD-CS + GP2/SD-SCK; Logic
+Analyzer = the whole locked bus) + I2C-scanner + demo; defer the button-menu screens (Macro/Baud/SD-
+explorer) to M4; M3-core = Mascot/bridge-home · Sniffer/live-UART · Watchdog/flight-recorder · Throughput
+· +Clock · +Recorder-status. Three corrections the critic proved against the source reshaped the plan:
+(1) a cross-task race ALREADY shipped in `{"q":"rec"}` (fixed in M3.0); (2) DASH and SD are the SAME
+priority (idle+0), not "dash below SD" — a heavy render time-slices the recorder drain, so `rec_drop`
+must be gate-proven 0; (3) the probe-active signal needs an edit on the upstream DAP hot path — DEFERRED
+out of M3 core, gated on a probe-rs re-soak if ever added.
+
+---
+
+## Increment M3.0 — HW reconciliation + snapshot boundary — **PASS (live, 2026-06-20)**
+
+**Falsifiable claim.** (a) The surviving output HW (status LEDs, buzzer) drives correctly and
+NON-BLOCKING, off the DAP hot path; on-device input is gone (no button) and that is reconciled. (b) The
+SD/recorder task can publish a CONSISTENT snapshot of recorder state that any other task reads lock-free,
+so the dashboard never touches `g_rec` across the task boundary — and routing the existing `{"q":"rec"}`
+through it CLOSES a real pre-existing race. (c) None of this regresses the R1 DAP guarantee.
+
+### Part 1 — feedback HAL (`src/feedback.{c,h}` + `src/ws2812.pio`)
+Non-blocking NeoPixel + buzzer, serviced from the low-prio SD task (`feedback_service()` each 20 ms tick),
+so a beep dwell or pixel write never sits on the DAP/USB path. Buzzer = GP29 PWM tone (clkdiv 64, 50 %
+duty). Status LED = the XIAO onboard **WS2812 NeoPixel** (GP12 data + GP11 power-enable), driven via PIO
+(pio1 — SWD owns pio0) so the SM clocks the 800 kHz waveform in HARDWARE and the CPU only pushes one word
+(never blocks/masks IRQs → R1-safe). Beep + pixel requests each latch as one 32-bit slot (atomic cross-task
+hand-off). CDC1 commands added: `{"q":"beep","hz":N,"ms":M}`, `{"q":"led","r":0/1,"g":0/1}`, and
+`{"q":"pixel","r":0..255,"g":..,"b":..}` (with a new `get_int` jsmn numeric extractor).
+
+**HIL (operator-observed, the one camera-/ear-in-the-loop step the gate needs):**
+- **Buzzer GP29: PASS** — three rising tones (1500/2200/3000 Hz) audible; non-blocking (no DAP effect).
+- **NeoPixel GP12/GP11: PASS** — `{"q":"pixel"}` RED→GREEN→BLUE→WHITE→off all rendered correctly (GRB
+  order + power-enable + PIO init confirmed). This is the M3 status LED.
+- **Finding M3-1 (why NeoPixel, not the onboard RGB):** the first reconcile drove the onboard RGB on
+  GP17/GP16; it lit, but the observed colour did NOT match the nominal R=17/G=16 spec and it competes with
+  the probe's GP25 blue USB-heartbeat (`usb_thread` free-runs GP25) → unreliable as a status channel. The
+  XIAO's onboard WS2812 NeoPixel (GP12/GP11) is bright, fully colour-addressable, and conflict-free, so M3
+  uses it instead. No physical button exists (GP27 = SWDIO) → input is auto-cycle + CDC1 (next/prev/screen),
+  reconciled. (External buttons/LEDs/sensors are a deferred soldering option per the user.)
+
+### Part 2 — published recorder snapshot (`rec_snapshot_t` + seqlock)
+The SD/recorder task is the SOLE owner of `recorder_t` / the freeze ring / the RTC. It now publishes a POD
+`rec_snapshot_t` (logging, wedge, sd_mounted, rx_total, hits, tp_peak, last_err, rec_drop, `file[16]`,
+`alert[24]`, `tail[80]`, cached `rtc`) once per loop after `recorder_tick()`, via a single-writer SEQLOCK
+(odd/even seq + `__atomic` RELEASE/ACQUIRE fences; reader retries until seq is even + unchanged).
+`dash_get_rec_snapshot()` is the lock-free reader for the dashboard (M3.1+) AND for CDC1. The wall-clock
+is cached here at ~1 Hz so the dashboard renders time with ZERO i2c1 access (only the OLED show takes the
+bus — keeps the i2c1 contenders at two, structurally avoiding the non-recursive-mutex nesting hazard).
+`recorder_copy_tail()` exposes the freeze tail (public alias of the static `freeze_read_last`) so ONLY the
+owning task fills `snapshot.tail`.
+
+**Race fixed (the critic's H1, confirmed in source).** The old `sd_rec_status_json()` ran in the TUD task
+and called `recorder_get_status(&g_rec)` — handing out a LIVE pointer into `g_rec.filename` (rewritten by
+`recorder_start` mid-`snprintf` → torn/unterminated read, possible over-read past `REC_FILENAME_CAP`) and
+calling `hw->sd_mounted()` off the owning task, violating `recorder.h`'s own "owned SOLELY by the recorder
+task" contract. It now reads the published snapshot instead — race closed for both `{"q":"rec"}` and the
+future dashboard.
+
+### Gates (falsifiable)
+- **DAP binds:** `probe-rs list` → `Hackagotchi Probe (CMSIS-DAP)`. ✓
+- **Snapshot robustness / torn-read:** hammered `{"q":"rec"}` ×80 → 80/80 well-formed JSON, filename
+  always `log_NNN.txt` (regex-checked), 0 malformed/torn. ✓ (The fix is structural, not timing-dependent:
+  the filename is now a bounded copy taken by the owning task under the seqlock.)
+- **R1 re-soak (the regression gate):** `tests/m2/coexist_soak.py 200` — recgen continuous SD writes +
+  200 concurrent DAP flash cycles (400 ops). **DAP 0 fails / 0 stalls** (better than M2's 6/600 baseline),
+  recorder err=0 / logging=1 / wedge=0 / **rec_drop=0** (the extra per-loop publish + feedback service did
+  NOT overflow the recorder ring), rx 0→472164 (461 KB written during flashing), on-card RECGEN intact. ✓
+- **Health:** `{"q":"status"}` fw=Hackagotchi, crashes=0, wd_armed=1, dashboard looping; RTC valid + ticking.
+
+**Verdict: PASS.** The output HW is reconciled (buzzer reliable, onboard LED best-effort, no button), the
+snapshot boundary that all M3 screens depend on is in place and lock-free, a real pre-existing race is
+closed, and R1 is intact (0/400 under load, rec_drop=0). Foundation laid for M3.1 (screen framework).
+
+Build: `BUILD_DIR=/tmp/hg-build-m3np ./build_fork.sh` (text 179792). Device resting on `/tmp/hg-build-m3np`
+(M3.0 image: snapshot boundary + buzzer + NeoPixel). R1 re-confirmed on this exact build (see soak above).

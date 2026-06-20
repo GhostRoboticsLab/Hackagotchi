@@ -92,7 +92,23 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     + M2_RESULTS.md.
 - [x] **M2 SD + black-box logging — COMPLETE** *(2026-06-20)*: SD gate · recorder core (host 31/31) ·
   HW wiring · RAM-headroom (copy_to_ram→XIP, +139 KB) · PCF8563 RTC wall-clock stamps · coexistence soak.
-- [ ] M3 core screens; M4 full UI parity; M5 polish + tagged release (.uf2 + .elf).
+- [~] **M3 core screens** — IN PROGRESS (`firmware/c/tests/m3/M3_RESULTS.md`). Design of record =
+  `m3-design` workflow (screen triage + thread-safe snapshot boundary + adversarial critique).
+  - [x] **M3.0 HW-reconciliation + snapshot boundary** — **PASS, HIL-verified** *(2026-06-20)*:
+    `src/feedback.{c,h}` + `src/ws2812.pio` (non-blocking buzzer GP29 + **WS2812 NeoPixel** GP12/GP11
+    status LED via PIO/pio1, serviced off the hot path) + `{"q":"beep"}`/`{"q":"led"}`/`{"q":"pixel"}`.
+    Buzzer PASS; **NeoPixel PASS** (RED/GREEN/BLUE/WHITE all correct). **Finding M3-1:** the onboard RGB
+    GP17/16 is an unreliable status channel (color ≠ nominal + competes w/ the GP25 USB-heartbeat) → use
+    the NeoPixel. No button (GP27=SWDIO) → input is auto-cycle + CDC1; external buttons/LEDs later. Published
+    `rec_snapshot_t` (single-writer seqlock, SD task) + `dash_get_rec_snapshot()` + `recorder_copy_tail()`
+    + cached RTC; **fixed the pre-existing `{"q":"rec"}` cross-task race** (live `g_rec.filename` pointer +
+    off-task `hw->sd_mounted()`). Gates: DAP binds, `{"q":"rec"}`×80 0 torn, **coexist soak 0/400 + rec_drop=0**.
+  - [ ] **M3.1** screen framework (screen table + clamped index, auto-cycle + CDC1 next/prev/screen,
+    self-attestation w/ show-success counter) + first real screen (Recorder/SD status) + R1 re-soak.
+  - [ ] **M3.2** core screen set (Mascot/bridge home · Sniffer/live-UART · Watchdog/flight-recorder ·
+    Throughput · Clock) — all fed by published snapshots; no direct g_rec/freeze/RTC access from DASH.
+  - [ ] **M3.3** buzzer/LED event feedback (wedge/SD-fault/trigger) + OPTIONAL gated probe-active + closeout.
+- [ ] M4 full UI parity (Macro/Baud/SD-explorer via CDC1+snapshot redesign); M5 polish + tagged release (.uf2 + .elf).
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,
   tighter analyzers, RTT observability.
 
