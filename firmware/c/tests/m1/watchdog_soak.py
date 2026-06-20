@@ -2,44 +2,34 @@
 """
 M1 watchdog arm-by-default SAFETY soak.  SPDX-License-Identifier: MIT
 
-Falsifiable claim:
-  With the SW watchdog ARMED BY DEFAULT, sustained heavy load (repeated target flashes over DAP +
-  the USB traffic they drive) does NOT spuriously reboot the probe — `up` only ever increases and the
-  `crashes` counter never increments. (If a flash could starve the monitored TUD task past the 4 s
-  stall window, the watchdog would fire: `up` would reset and `crashes` would jump -> FAIL.)
+Claim under test (corroboration, not proof — see note):
+  With the SW watchdog ARMED BY DEFAULT, sustained heavy load on the MONITORED task (TUD) does NOT
+  spuriously reboot the probe: `up` only increases, `crashes` never increments.
 
-This is the "characterise under flash load" proof behind flipping the watchdog to armed-by-default.
+The watchdog monitors TUD, so the load must hit TUD, not just DAP. This soak therefore drives BOTH
+concurrently: a background thread flashing the target over DAP (USB vendor transfers -> TUD) AND a
+foreground CDC0 loopback "firehose" (USB CDC IN+OUT -> TUD + the bridge task). If TUD ever stalled past
+the 4 s window under this, the armed watchdog would fire -> `up` resets / `crashes` jumps -> FAIL.
 
-Run (pyserial venv): .venv/bin/python firmware/c/tests/m1/watchdog_soak.py [cycles]
-  (run from firmware/c so the blink fixtures resolve)
+NOTE ON STRENGTH: a soak cannot positively prove the ABSENCE of a false-fire margin. The real safety
+guarantee is the PRIORITY argument (TUD prio +2 > DAP +1, TUD always has work and is never starved);
+this soak CORROBORATES it under real sustained load. To avoid a silent no-op pass, it requires that
+real flashing actually happened (flash_ok >= MIN) and real CDC traffic flowed.
+
+Run (from firmware/c):  .venv/bin/python tests/m1/watchdog_soak.py [seconds]
 """
 import glob
 import subprocess
 import sys
+import threading
 import time
 
 import serial  # pyserial
 
 BAUD = 115200
 FIX = ["tests/gates/fixtures/blink_a.elf", "tests/gates/fixtures/blink_b.elf"]
-
-
-def find_ctrl(timeout=20):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        for p in sorted(glob.glob("/dev/cu.usbmodem*")):
-            try:
-                with serial.Serial(p, BAUD, timeout=0.5) as s:
-                    s.reset_input_buffer()
-                    s.write(b'{"q":"status"}\n')
-                    s.flush()
-                    time.sleep(0.5)
-                    if "Hackagotchi" in s.read(400).decode(errors="replace"):
-                        return p
-            except Exception:
-                pass
-        time.sleep(0.5)
-    return None
+FIREHOSE = b"HACKAGOTCHI_WD_SOAK_FIREHOSE_0123456789_ABCDEFGHIJKLMNOP\n"  # 56 B, pumped via CDC0 loopback
+MIN_FLASHES = 5  # below this, the DAP load was a no-op -> soak invalid (closes the silent-pass path)
 
 
 def field_int(reply, key):
@@ -57,60 +47,133 @@ def field_int(reply, key):
         return None
 
 
-def status(s):
-    s.reset_input_buffer()
-    s.write(b'{"q":"status"}\n')
-    s.flush()
-    time.sleep(0.5)
-    return s.read(400).decode(errors="replace").strip()
+def find_ports():
+    cands = sorted(glob.glob("/dev/cu.usbmodem*"))
+    ctrl = None
+    for p in cands:
+        try:
+            with serial.Serial(p, BAUD, timeout=0.6) as s:
+                s.reset_input_buffer()
+                s.write(b'{"q":"status"}\n')
+                s.flush()
+                time.sleep(0.5)
+                if "Hackagotchi" in s.read(400).decode(errors="replace"):
+                    ctrl = p
+                    break
+        except Exception:
+            pass
+    if not ctrl:
+        return None, None
+    data = [p for p in cands if p != ctrl]
+    return (data[0] if data else None), ctrl
+
+
+def status(c):
+    c.reset_input_buffer()
+    c.write(b'{"q":"status"}\n')
+    c.flush()
+    time.sleep(0.4)
+    return c.read(400).decode(errors="replace").strip()
 
 
 def main():
-    cycles = int(sys.argv[1]) if len(sys.argv) > 1 else 25
-    port = find_ctrl()
-    if not port:
-        print("FAIL: no control node")
+    secs = int(sys.argv[1]) if len(sys.argv) > 1 else 80
+    data_port, ctrl_port = find_ports()
+    if not ctrl_port or not data_port:
+        print("FAIL: need both CDC nodes (CDC0 data + CDC1 control)")
         return 1
+    print(f"CDC0={data_port} CDC1={ctrl_port}; soaking ~{secs}s (DAP flash thread + CDC0 firehose)")
 
-    with serial.Serial(port, BAUD, timeout=1.2) as s:
-        base = status(s)
+    flash = {"ok": 0, "fail": 0, "stop": False}
+
+    def flasher():
+        i = 0
+        while not flash["stop"]:
+            elf = FIX[i % 2]
+            i += 1
+            try:
+                r = subprocess.run(["probe-rs", "download", "--chip", "RP2040", elf],
+                                   capture_output=True, text=True, timeout=60)
+                if r.returncode == 0:
+                    flash["ok"] += 1
+                else:
+                    flash["fail"] += 1
+                    print(f"  [flash rc={r.returncode}] {r.stderr.strip()[:90]}")
+            except Exception as e:
+                flash["fail"] += 1
+                print(f"  [flash EXC] {e}")
+
+    up0 = cr0 = None
+    last_up = -1
+    fh_bytes = 0
+    fired = False
+    with serial.Serial(data_port, BAUD, timeout=1.0) as d, serial.Serial(ctrl_port, BAUD, timeout=1.0) as c:
+        time.sleep(0.6)
+        c.write(b'{"q":"uloop_on"}\n')
+        c.flush()
+        time.sleep(0.4)
+        c.read(100)
+
+        base = status(c)
         up0, cr0, armed = field_int(base, "up"), field_int(base, "crashes"), field_int(base, "wd_armed")
         print(f"[baseline] {base}")
         if armed != 1:
             print("FAIL: watchdog is not armed by default (wd_armed != 1)")
             return 1
-        print(f"[baseline] up={up0} crashes={cr0} armed={armed}; soaking {cycles} flash cycles...")
-
         last_up = up0
-        flashes_ok = 0
-        for i in range(cycles):
-            elf = FIX[i % 2]
-            r = subprocess.run(["probe-rs", "download", "--chip", "RP2040", elf],
-                               capture_output=True, text=True, timeout=60)
-            if r.returncode == 0:
-                flashes_ok += 1
-            # check probe health after each flash
-            st = status(s)
-            up, cr = field_int(st, "up"), field_int(st, "crashes")
-            tag = "ok" if r.returncode == 0 else f"flash-rc={r.returncode}"
-            print(f"  cycle {i+1:2d}/{cycles} [{tag}] up={up} crashes={cr}")
-            if up is None or cr is None:
-                print("FAIL: lost the probe (no status) mid-soak")
-                return 1
-            if cr != cr0:
-                print(f"FAIL: crashes incremented {cr0}->{cr} — the armed watchdog (or a fault) FIRED")
-                return 1
-            if up < last_up:
-                print(f"FAIL: up went backwards {last_up}->{up} — the probe REBOOTED (spurious watchdog)")
-                return 1
-            last_up = up
 
-        final = status(s)
+        t = threading.Thread(target=flasher, daemon=True)
+        t.start()
+
+        t0 = time.time()
+        i = 0
+        while time.time() - t0 < secs:
+            # CDC0 loopback firehose -> loads the monitored TUD task hard
+            d.reset_input_buffer()
+            d.write(FIREHOSE)
+            d.flush()
+            fh_bytes += len(FIREHOSE)
+            time.sleep(0.04)
+            d.read(len(FIREHOSE))
+            if i % 25 == 0:  # health check every ~2 s
+                st = status(c)
+                up, cr = field_int(st, "up"), field_int(st, "crashes")
+                if up is None or cr is None:
+                    print("FAIL: lost the probe (no status) mid-soak")
+                    flash["stop"] = True
+                    return 1
+                if cr != cr0 or up < last_up:
+                    print(f"FAIL: watchdog/fault FIRED — up {last_up}->{up}, crashes {cr0}->{cr}")
+                    fired = True
+                    break
+                last_up = up
+                print(f"  t={int(time.time()-t0):2d}s up={up} crashes={cr} "
+                      f"flash_ok={flash['ok']} flash_fail={flash['fail']} fh={fh_bytes//1024}KB")
+            i += 1
+
+        flash["stop"] = True
+        t.join(timeout=65)
+        final = status(c)
         up1, cr1 = field_int(final, "up"), field_int(final, "crashes")
+        c.write(b'{"q":"uloop_off"}\n')
+        c.flush()
         print(f"[final] {final}")
 
-    print(f"\nPASS: {flashes_ok}/{cycles} flashes; armed watchdog did NOT false-fire "
-          f"(up {up0}->{up1} monotonic, crashes steady at {cr1})")
+    # verdict
+    if fired:
+        return 1
+    if flash["ok"] < MIN_FLASHES:
+        print(f"FAIL: only {flash['ok']} flashes succeeded (< {MIN_FLASHES}) — DAP load was a no-op, soak invalid")
+        return 1
+    if cr1 != cr0:
+        print(f"FAIL: crashes changed {cr0}->{cr1}")
+        return 1
+    if up1 is None or up0 is None or up1 < up0:
+        print(f"FAIL: up not monotonic ({up0}->{up1}) — probe rebooted")
+        return 1
+    print(f"\nPASS: armed watchdog did NOT false-fire under load "
+          f"({flash['ok']} flashes [{flash['fail']} failed] + {fh_bytes//1024}KB CDC firehose; "
+          f"up {up0}->{up1} monotonic, crashes steady at {cr1})")
     return 0
 
 

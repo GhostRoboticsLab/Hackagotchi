@@ -104,15 +104,18 @@ def main():
 
     # --- assertions ---
     ok = True
-    if "hardfault" not in last1:
-        print("FAIL: lastfault did not report a hardfault (crash box did NOT survive the reboot)")
+    if '"kind":"hardfault"' not in last1:
+        print("FAIL: lastfault kind != hardfault (crash box did NOT survive the reboot)")
         ok = False
     pc = None
     i = last1.find('"pc":"')
     if i >= 0:
         pc = last1[i + 6 : last1.find('"', i + 6)]
-    if not pc or pc == "0x00000000":
-        print(f"FAIL: captured PC missing/zero ({pc})")
+    pcval = int(pc, 16) if pc else 0
+    # The copy_to_ram image runs from SRAM (0x20000000-0x20042000); a sane captured PC lands there,
+    # not at 0 or some wild address — turns the PC check from 'nonzero' into 'plausible code address'.
+    if not (0x20000000 <= pcval < 0x20042000):
+        print(f"FAIL: captured PC {pc} is not a plausible SRAM code address (garbage capture?)")
         ok = False
     if crashes1 is None or crashes0 is None or crashes1 != crashes0 + 1:
         print(f"FAIL: crash count did not advance by 1 ({crashes0} -> {crashes1})")

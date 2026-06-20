@@ -10,9 +10,12 @@ Falsifiable claim:
   dropped.
 
 Why it can FAIL (not a tautology):
-  - If the RX IRQ / ring / drain path is broken, nothing comes back on CDC0 -> FAIL.
+  - If the RX IRQ / ring / drain path is broken, nothing comes back on CDC0 -> FAIL. This is the
+    per-run rank-1 signal: cdc_task drains target->host EXCLUSIVELY via uart_bridge_read (spsc_pop),
+    so any bytes returned this run necessarily traversed the ring this run.
   - If the ring overflowed, urx_drop > 0 -> FAIL.
-  - If the ring never filled (urx_hw == 0) the capture path didn't run -> FAIL.
+  (urx_hw is a MONOTONIC peak that persists for the firmware's uptime, so it is corroborating only,
+  NOT a per-run pass/fail signal — a stale peak from earlier traffic would mask a broken run.)
 
 Needs NO external jumper (uses the chip's internal loopback). Uses single held connections (no
 reconnect churn, which wedges the macOS USB-CDC driver).
@@ -123,18 +126,16 @@ def main():
         ctrl_cmd(c, '{"q":"uloop_off"}\n')  # cleanup
 
     ok = True
-    if bytes(got) != PAYLOAD:
+    if bytes(got) != PAYLOAD:  # per-run rank-1 proof: returned bytes must have traversed the ring
         print("FAIL: round-trip payload mismatch (capture path broken or lossy)")
-        ok = False
-    if hw1 is None or hw1 <= 0:
-        print("FAIL: ring high-watermark never advanced — RX capture did not run")
         ok = False
     if dr1 is None or dr1 != 0:
         print(f"FAIL: ring dropped bytes (urx_drop={dr1})")
         ok = False
+    print(f"[corroborate] ring high-watermark {hw0}->{hw1} (monotonic peak — informational only)")
 
     if ok:
-        print(f"\nPASS: full payload round-tripped through IRQ->ring->drain; urx_hw {hw0}->{hw1}, 0 drops")
+        print(f"\nPASS: full {len(PAYLOAD)}B payload round-tripped through IRQ->ring->drain, 0 drops")
         return 0
     return 1
 
