@@ -46,7 +46,12 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     proves strstr false-positives (`{"q":"statusx"}`, `{"note":"status please"}`) are now rejected +
     fragmented requests reassemble. **Finding F1-4:** a JSON parser's locals overflowed the 1 KB TUD
     task stack (ENXIO on CDC1) — fixed with static buffers + a 512-word TUD stack.
-  - [ ] bounded SPSC UART bridge (CDC0) hardening; per-interface USB string descriptors; error-code+goto-cleanup idiom.
+  - [x] **bounded SPSC UART bridge (CDC0) hardening** — **PASS, HIL-verified** *(2026-06-20)*:
+    target→host RX is now interrupt-driven into a 4 KB lock-free SPSC ring (`src/spsc_ring.h` +
+    `src/uart_bridge.c`), replacing the polling-into-32B that lost bytes between polls. Host unit test
+    `tests/m1/ring_test.c` (6/6); HIL `tests/m1/uart_bridge_hil.py` round-trips via PL011 internal
+    loopback (no jumper), 0 drops. Telemetry `urx_drop`/`urx_hw`/`utx_drop` in status.
+  - [ ] per-interface USB string descriptors (stable CDC0=UART / CDC1=Control naming); error-code+goto-cleanup idiom.
   - [ ] Watchdog hardening: characterise DAP/UART/DASH cadence under flash load → monitor them +
     flip the watchdog to armed-by-default.
 - [ ] M2 SD + black-box logging (carlk3 FatFs, low-prio writer); RTC timestamps.

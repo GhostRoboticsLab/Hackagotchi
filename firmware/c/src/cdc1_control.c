@@ -28,9 +28,11 @@
 #define JSMN_STATIC                 // keep jsmn symbols file-local (header-only, single TU)
 #include "jsmn.h"
 
+#include "probe_config.h"           // PROBE_UART_INTERFACE (for the uart loopback HIL test)
 #include "hackagotchi_dashboard.h"  // g_dash_counter, g_dash_stall_us (self-attestation telemetry)
 #include "crash_box.h"              // lastfault readout + the crash HIL self-test
 #include "watchdog_task.h"          // wd_arm + g_tud_wedge (watchdog control + HIL test)
+#include "uart_bridge.h"            // uart ring stats + loopback toggle (CDC0 bridge HIL test)
 
 // Build-discriminating tags compiled into the status reply so the RUNNING firmware proves its OWN
 // identity (closes the Gate-1 provenance gap). Mirror the CMake -D flags (PRIVATE on the target).
@@ -62,16 +64,19 @@ static void reply(uint8_t itf, const char *s) {
 // reentrant) TUD task, and ~0.5 KB of JSON locals on the small USB task stack overflows it (corrupts
 // the USB endpoint state -> the host sees ENXIO). Keep big buffers off this stack.
 static void write_status(uint8_t itf) {
-  static char r[176];
+  static char r[240];
   int len = snprintf(r, sizeof r,
                      "{\"fw\":\"Hackagotchi\",\"heap\":%u,\"up\":%u,\"n\":%u,"
                      "\"stall_cfg\":%d,\"stall_us\":%u,\"prio\":%d,"
-                     "\"crashes\":%u,\"wd_armed\":%d,\"page\":%d}\n",
+                     "\"crashes\":%u,\"wd_armed\":%d,\"page\":%d,"
+                     "\"urx_drop\":%u,\"urx_hw\":%u,\"utx_drop\":%u}\n",
                      (unsigned) xPortGetFreeHeapSize(),
                      (unsigned) (time_us_64() / 1000000ull),
                      (unsigned) g_dash_counter, (int) ADVERSARIAL_STALL_MS,
                      (unsigned) g_dash_stall_us, (int) HACKA_DASH_PRIO,
-                     (unsigned) crash_box_count(), (int) wd_is_armed(), s_page);
+                     (unsigned) crash_box_count(), (int) wd_is_armed(), s_page,
+                     (unsigned) uart_bridge_drops(), (unsigned) uart_bridge_highwater(),
+                     (unsigned) cdc_uart_tx_overflow());
   if (len > 0) reply(itf, r);
 }
 
@@ -131,6 +136,9 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   if (!strcmp(q, "wd_arm"))    { wd_arm(); reply(itf, "{\"wd\":\"armed\"}\n"); return; }
   if (!strcmp(q, "next"))      { s_page++; write_page(itf); return; }
   if (!strcmp(q, "prev"))      { if (s_page > 0) s_page--; write_page(itf); return; }
+  // UART-bridge HIL self-test: PL011 internal loopback (TX->RX in-chip) — round-trip CDC0 with no jumper.
+  if (!strcmp(q, "uloop_on"))  { uart_bridge_set_loopback(PROBE_UART_INTERFACE, true);  reply(itf, "{\"uloop\":1}\n"); return; }
+  if (!strcmp(q, "uloop_off")) { uart_bridge_set_loopback(PROBE_UART_INTERFACE, false); reply(itf, "{\"uloop\":0}\n"); return; }
 
   reply(itf, "{\"err\":\"unknown\"}\n");
 }
