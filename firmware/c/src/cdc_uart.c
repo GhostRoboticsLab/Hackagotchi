@@ -39,6 +39,7 @@
 #include "tusb.h"
 
 #include "probe_config.h"
+#include "uart_bridge.h"   // [HACKAGOTCHI] M1: IRQ-driven RX capture into a bounded SPSC ring
 
 // [HACKAGOTCHI] CDC instance index of the target-UART bridge (CDC0). CDC1 (index 1) = JSON control.
 #define CDC_ITF_UART 0
@@ -48,9 +49,13 @@ TickType_t last_wake, interval = 100;
 volatile TickType_t break_expiry;
 volatile bool timed_break;
 
-/* Max 1 FIFO worth of data */
-static uint8_t tx_buf[32];
-static uint8_t rx_buf[32];
+// [HACKAGOTCHI] host->target overflow: bytes that couldn't be written to the host CDC FIFO. Upstream
+// counted this but never surfaced it; expose it as bridge telemetry (see uart_bridge.h).
+static volatile uint32_t cdc_tx_oe = 0;
+uint32_t cdc_uart_tx_overflow(void) { return cdc_tx_oe; }
+
+static uint8_t tx_buf[32];      /* host->target: max 1 FIFO worth (TX path unchanged) */
+static uint8_t rx_buf[64];      /* target->host: drained from the SPSC ring, not the HW FIFO */
 // Actually s^-1 so 25ms
 #define DEBOUNCE_MS 40
 static uint debounce_ticks = 5;
@@ -69,6 +74,7 @@ void cdc_uart_init(void) {
     gpio_set_pulls(PROBE_UART_TX, 1, 0);
     gpio_set_pulls(PROBE_UART_RX, 1, 0);
     uart_init(PROBE_UART_INTERFACE, PROBE_UART_BAUDRATE);
+    uart_bridge_init(PROBE_UART_INTERFACE);  // [HACKAGOTCHI] arm IRQ-driven RX capture
 
 #ifdef PROBE_UART_TX_LED
     tx_led_debounce = 0;
@@ -108,14 +114,13 @@ void cdc_uart_init(void) {
 bool cdc_task(void)
 {
     static int was_connected = 0;
-    static uint cdc_tx_oe = 0;
     uint rx_len = 0;
     bool keep_alive = false;
 
-    // Consume uart fifo regardless even if not connected
-    while(uart_is_readable(PROBE_UART_INTERFACE) && (rx_len < sizeof(rx_buf))) {
-        rx_buf[rx_len++] = uart_getc(PROBE_UART_INTERFACE);
-    }
+    // [HACKAGOTCHI] Drain bytes the RX IRQ already captured into the SPSC ring (the HW FIFO is emptied
+    // by the IRQ the instant data arrives, so no firehose overflow between polls). Bytes captured while
+    // the host is disconnected accumulate in the ring (bounded) until it drains or overflows.
+    rx_len = uart_bridge_read(rx_buf, sizeof(rx_buf));
 
     if (tud_cdc_connected()) {
         was_connected = 1;
@@ -270,6 +275,7 @@ void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const* line_coding)
   }
 
   uart_set_format(PROBE_UART_INTERFACE, data_bits, stop_bits, parity);
+  uart_bridge_rearm(PROBE_UART_INTERFACE);  // [HACKAGOTCHI] re-enable RX IRQ after the uart re-init
   /* Windows likes to arbitrarily set/get line coding after dtr/rts changes, so
    * don't resume if we shouldn't */
   if(tud_cdc_connected())

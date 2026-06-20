@@ -44,6 +44,7 @@ add_executable(hackagotchi_probe
         ${CMAKE_CURRENT_LIST_DIR}/src/ssd1306/ssd1306.c
         ${CMAKE_CURRENT_LIST_DIR}/src/usb_descriptors.c      # Gate 2: 2nd CDC + IAD composite
         ${CMAKE_CURRENT_LIST_DIR}/src/cdc_uart.c             # Gate 2: itf-guard the CDC class callbacks
+        ${CMAKE_CURRENT_LIST_DIR}/src/uart_bridge.c          # M1: IRQ-driven RX capture into an SPSC ring
         ${CMAKE_CURRENT_LIST_DIR}/src/cdc1_control.c         # Gate 2: CDC1 JSON control handler
         ${CMAKE_CURRENT_LIST_DIR}/src/crash_box.c            # M1: post-mortem crash box + HardFault handler
         ${CMAKE_CURRENT_LIST_DIR}/src/watchdog_task.c        # M1: SW watchdog (HW WDT + per-task check-in)
@@ -96,6 +97,7 @@ target_link_libraries(hackagotchi_probe PRIVATE
         tinyusb_device
         tinyusb_board
         hardware_pio
+        hardware_irq            # M1 uart_bridge: RX IRQ handler
         hardware_i2c            # OLED coexistence task
         hardware_watchdog       # M1 crash box: watchdog_reboot + scratch-register mirror; SW watchdog
         pico_bootrom            # M1: reset_usb_boot for the {"q":"bootsel"} self-reflash command

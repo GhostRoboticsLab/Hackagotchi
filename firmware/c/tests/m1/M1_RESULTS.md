@@ -151,9 +151,53 @@ descriptors are not done.
 **Verdict: PASS** — structured JSON control dispatch verified at rank-1, including the strstr
 false-positive rejection that is the point of the increment.
 
+---
+
+## Increment 4 — SPSC UART-bridge hardening (IRQ-driven RX) — **PASS (live, 2026-06-20)**
+
+**Falsifiable claim.** Target→host UART capture is interrupt-driven into a bounded SPSC ring (not
+polled into a 32-byte buffer that drops bytes between polls), and a payload round-trips through the
+full path — CDC0 → UART TX → (PL011 internal loopback) → UART RX → RX IRQ → ring → bridge drains →
+CDC0 — with the ring high-watermark advancing and 0 drops.
+
+**Problem fixed.** Stock debugprobe `cdc_task()` polls `uart_is_readable()` into a 32-byte buffer once
+per interval; the 32-byte HW FIFO overflows between polls at speed (its own comment: "reading from a
+firehose"), silently losing target bytes — fatal for a black-box recorder.
+
+**Implementation** (`src/spsc_ring.h`, `src/uart_bridge.{c,h}`, `src/cdc_uart.c`):
+- `spsc_ring.h`: header-only lock-free SPSC byte ring (release/acquire fences order data vs head/tail;
+  drop-on-full counted, never silent). Hardware-independent so the firmware + the host unit test
+  compile the SAME code.
+- `uart_bridge.c`: the UART RX IRQ (producer) drains the HW FIFO into a 4 KB ring the instant bytes
+  arrive; `cdc_task()` (consumer) drains the ring → CDC0. Re-armed after a baud-change UART re-init.
+- Telemetry surfaced in `status`: `urx_drop` (ring overflow), `urx_hw` (ring high-watermark), and
+  `utx_drop` (host→target overflow — upstream counted it but never exposed it; that dead-variable
+  `-Wall` warning is now fixed by surfacing it).
+- `uloop_on`/`uloop_off` toggle the PL011 internal loopback (LBE) — a jumper-free HIL self-test.
+
+**Machine assertions (two, both can fail).**
+- Host: `tests/m1/ring_test.c` — `cc -I src ... ring_test.c` — 6/6 (FIFO order, full+drops,
+  wraparound, partial pop, high-watermark). Off-target proof of the ring logic.
+- HIL: `tests/m1/uart_bridge_hil.py` — enable loopback, write a 55 B payload to CDC0, assert it
+  returns byte-identical, `urx_hw>0`, `urx_drop==0`.
+
+**Result (live, m1e).** Host ring test 6/6 PASS. HIL: payload round-tripped byte-identical
+(`urx_hw 16→16`, 0 drops). Regression: jsmn control, crash box (count→4), watchdog (kind=watchdog/TUD,
+count→5) all PASS; DAP still binds.
+
+**Disclosed (not blockers).** The loopback test proves the capture path is functional + lossless at
+its rate; a high-baud *burst*-loss A/B (the original firehose scenario) wasn't run — no fast external
+UART source on the bench — but the architecture prevents it by construction (the IRQ empties the HW
+FIFO immediately rather than once per poll). The host→target (TX) path still uses
+`uart_write_blocking` for ≤16 B batches (bounded; not the documented loss path). On host disconnect
+the ring fills then drops-newest (counted); an M2 recorder draining to SD changes that.
+
+**Verdict: PASS** — target-UART capture is now interrupt-driven + bounded, proven end-to-end at
+rank-1 with a host-tested ring underneath.
+
 ### Remaining in M1 (next increments)
-- Bounded SPSC UART bridge (CDC0) hardening; per-interface USB string descriptors (stable
-  CDC0=UART / CDC1=Control naming).
+- per-interface USB string descriptors (stable CDC0=UART / CDC1=Control naming).
 - error-code + goto-cleanup idiom adopted for new code.
 - Watchdog hardening: characterise DAP/UART/DASH cadence under flash load, then monitor them + flip
   the watchdog to armed-by-default.
+- (Lower priority) non-blocking host→target TX; high-baud burst-loss A/B with a fast UART source.
