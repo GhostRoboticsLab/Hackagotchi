@@ -184,12 +184,14 @@ firehose"), silently losing target bytes — fatal for a black-box recorder.
 - `uloop_on`/`uloop_off` toggle the PL011 internal loopback (LBE) — a jumper-free HIL self-test.
 
 **Machine assertions (two, both can fail).**
-- Host: `tests/m1/ring_test.c` — `cc -I src ... ring_test.c` — 6/6 (FIFO order, full+drops,
-  wraparound, partial pop, high-watermark). Off-target proof of the ring logic.
+- Host: `tests/m1/ring_test.c` — `cc -I src -pthread ... ring_test.c` — **35 CHECK assertions** (FIFO
+  order, full+drops, wraparound, partial pop, high-watermark) **+ a 4 M-op concurrent producer/consumer
+  fence stress** (added in the round-2 audit hardening; NDEBUG-proof `CHECK` macro, not `assert`; a
+  `RING_SELFTEST_BREAK` build verifies the harness can FAIL). Off-target proof of the ring logic + fences.
 - HIL: `tests/m1/uart_bridge_hil.py` — enable loopback, write a 55 B payload to CDC0, assert it
-  returns byte-identical, `urx_hw>0`, `urx_drop==0`.
+  returns byte-identical (the per-run rank-1 signal) and `urx_drop==0`.
 
-**Result (live, m1e).** Host ring test 6/6 PASS. HIL: payload round-tripped byte-identical
+**Result (live, m1e).** Host ring test 35/35 + concurrent stress PASS. HIL: payload round-tripped byte-identical
 (`urx_hw 16→16`, 0 drops). Regression: jsmn control, crash box (count→4), watchdog (kind=watchdog/TUD,
 count→5) all PASS; DAP still binds.
 
@@ -227,15 +229,17 @@ armed-by-default build:
   `kind=watchdog/task=TUD` → reboot → wd_armed=1 again).
 - Does NOT false-fire under load — `watchdog_soak.py` (a CORROBORATION, deliberately not a margin proof).
   It resets the stall peak (`wd_reset`), runs a background DAP flash thread + concurrent CDC0 firehose
-  for 80 s, and gates on what it can honestly decide: it did real work (`flash_ok ≥ 5`), it did not
-  reboot (`up` monotonic), nothing faulted/fired (`crashes` steady), and TUD missed no check-in window
-  this run (`wd_gap` 0 ms *since reset*). Live (`logs/watchdog_soak.log`): 118 flashes [0 failed] +
-  41 KB firehose, up monotonic, wd_gap 0. **What it does NOT claim:** that the load *stressed* TUD —
-  the TUD heartbeat free-runs at ~20 kHz even idle (so it can't prove load-correlation), and being
-  high-priority TUD is never driven near the 4000 ms threshold by any normal load. That last fact *is*
-  the safety guarantee (the priority argument: TUD +2 > DAP +1); the soak corroborates it under load.
-  (Earlier revisions over-claimed a "measured margin" / "proof the load reached TUD" via `wd_gap` and
-  `tud` — both were stale/free-running tautologies caught by the audit and removed; see Audit below.)
+  for 80 s, and **gates only on signals it can actually drive to FAIL**: it did real work
+  (`flash_ok ≥ 5`), it did not reboot (`up` monotonic), nothing faulted/fired (`crashes` steady).
+  Reported but **NOT gated** (the soak cannot drive them to fail → gating would be decorative): `wd_gap`
+  (stays 0 since reset under any soak-able load), the TUD heartbeat (free-runs at ~20 kHz even idle),
+  and firehose bytes. Live (`logs/watchdog_soak.log`): 118 flashes [0 failed] + 41 KB firehose, up
+  monotonic, wd_gap 0. **What it does NOT claim:** that the load *stressed* TUD — being high-priority,
+  TUD is never driven near the 4000 ms threshold by any normal load. That last fact *is* the safety
+  guarantee (the priority argument: TUD +2 > DAP +1); the soak corroborates it under load. (Earlier
+  revisions over-claimed a "measured margin"/"load reached TUD" via `wd_gap` and `tud_delta`; the
+  `tud_delta` gate was removed and `wd_gap` demoted to informational — both were free-running/stale
+  tautologies caught across audit rounds. A real TUD stall is exercised by `watchdog_hil.py` instead.)
 
 **(d) Error-code + goto-cleanup idiom** — codified as the project convention in
 `docs/firmware-conventions.md` (M1 modules are single-resource/early-return; the full idiom earns its
@@ -263,6 +267,11 @@ All M1 deliverables done and HIL-verified on hardware:
 stack → ENXIO; fix = static buffers + bigger stack).
 
 **Plan reconciliations (intentional deviations from `docs/engineering-plan.md`):**
+- **Single-core, not dual-core SMP (F1-1):** the plan §4.1 sketched DAP-on-core-1 SMP isolation;
+  debugprobe-v2.2.3 is single-core FreeRTOS (`configNUM_CORES=1`, no core affinity — SMP came later via
+  #189, the regression the pin avoids). So the coexistence guarantee is re-grounded on **priority
+  preemption** (DAP-and-everything stays preemptible; the dashboard sits below DAP), not core isolation.
+  This underpins the whole reliability core and is in `GATE_RESULTS.md`/`docs/firmware-conventions.md`/code.
 - **Priority order:** the plan §4.1 sketches TinyUSB > UART-bridge; the fork keeps upstream debugprobe's
   **UART-bridge (+3) > TUD (+2) > DAP (+1) > dashboard (+0)** (UART must preempt USB or bytes are lost).
   The watchdog being at the top tier (= UART bridge, above TUD/DAP/DASH) and monitoring TUD is unchanged. (Noted in

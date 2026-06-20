@@ -132,6 +132,7 @@ def main():
     print(f"[hardfault] PASS: PC={pc}, survived reboot, count {crashes0}->{crashes1}")
 
     # --- second fault path: force a malloc failure (proves the FreeRTOS malloc hook -> crash box) ---
+    up_pre_oom = field_int(query(port2, '{"q":"status"}\n'), "up")  # uptime witness baseline
     print("\n[oom] sending {\"q\":\"oom_test\"} -> exhaust FreeRTOS heap -> mallocfail hook + reboot ...")
     query(port2, '{"q":"oom_test"}\n', wait=0.4)
     time.sleep(2.0)
@@ -141,12 +142,17 @@ def main():
         return 1
     last_oom = query(port3, '{"q":"lastfault"}\n')
     crashes2 = field_int(status3, "crashes")
+    up_post_oom = field_int(status3, "up")
     print(f"[oom] lastfault: {last_oom}")
     if '"kind":"mallocfail"' not in last_oom:
         print("FAIL: OOM did not record kind=mallocfail (malloc hook -> crash box path broken)")
         return 1
     if crashes2 is None or crashes2 != crashes1 + 1:
         print(f"FAIL: crash count did not advance for the OOM fault ({crashes1} -> {crashes2})")
+        return 1
+    # Independent reboot witness for the OOM path too (mirror the HardFault path).
+    if up_pre_oom is None or up_post_oom is None or up_post_oom >= up_pre_oom:
+        print(f"FAIL: uptime did not reset for the OOM fault ({up_pre_oom}s -> {up_post_oom}s)")
         return 1
 
     print(f"\nPASS: HardFault (PC={pc}) AND mallocfail both captured + survived reboot "
