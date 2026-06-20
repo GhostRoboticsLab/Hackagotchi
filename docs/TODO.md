@@ -72,6 +72,12 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
   - [x] **RAM-headroom pass** — **DONE, HIL-verified** *(2026-06-20)*: 98%→87% (−30 KB, free SRAM
     4.5→34 KB). ffconf overlay (exFAT/LBA64/mkfs/expand off → ff.c 46→29 KB) + dropped unused SDIO
     (~11 KB, SPI-only + 2 stubs) + heap 44→34 KB. FatFs/recorder/M1 all verified intact. copy_to_ram kept.
+  - [x] **copy_to_ram → XIP (big RAM lever)** — **DONE, HIL-verified** *(2026-06-20)*: dropped
+    `copy_to_ram` (one CMake line → `pico_set_binary_type default`); code runs from flash XIP. No
+    `__not_in_flash_func` pinning needed (SWCLK is PIO-generated, hot path stays in the 16 KB XIP cache).
+    **Free SRAM 35 → 174 KB (+139 KB)** for M3. Full re-gate green: probe-rs 1000/1000 + openocd 200/200
+    (0/0), throughput +2.6 % (noise), crash box (PC now in flash 0x10xx) + watchdog HIL pass, M2 SD intact.
+    See `tests/m2/M2_RESULTS.md` "copy_to_ram → XIP".
   - [ ] **SD-write-during-flash coexistence soak** (heavy R1 proof) + RTC timestamps (PCF8563 @0x51,
     i2c1 mutex'd with OLED).
 - [ ] M3 core screens; M4 full UI parity; M5 polish + tagged release (.uf2 + .elf).

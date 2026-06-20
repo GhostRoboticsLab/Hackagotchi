@@ -2,8 +2,9 @@
  * Hackagotchi — FatFs config overlay. SPDX-License-Identifier: MIT
  *
  * Shadows carlk3's src/include/ffconf.h on the src-first include path to trim features we don't use,
- * shrinking ff.c (which sits in RAM under copy_to_ram). Everything else is deferred to the upstream
- * ffconf via #include_next — so the only thing to re-check on a carlk3 bump is these few overrides.
+ * shrinking ff.c (smaller flash image; originally an SRAM trim under copy_to_ram, now flash). Everything
+ * else is deferred to the upstream ffconf via #include_next — so the only thing to re-check on a carlk3
+ * bump is these few overrides.
  *
  * We KEEP ff.c (the FatFs core), FF_USE_LFN, and FF_USE_FIND (used by the log-index scan). We turn off
  * exFAT (cards <=32 GB are FAT32; our card is FAT32) + mkfs/expand (we never format or pre-allocate),

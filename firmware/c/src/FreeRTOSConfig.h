@@ -5,10 +5,11 @@
  * and defer everything else to upstream via #include_next (no full-copy maintenance — the only thing to
  * re-check on an upstream bump is this single override).
  *
- * WHY: the image is copy_to_ram (whole image in SRAM for deterministic SWD), and M2 adds carlk3 FatFs.
- * The FreeRTOS heap was 64 KB; measured runtime use is ~20 KB (task stacks incl. the 4 KB SD task +
- * 4 KB timer + idle + TCBs/queues + FatFs LFN mallocs). 34 KB leaves ~14 KB free heap — ample — while
- * reclaiming 30 KB of SRAM vs stock. (Was 44 KB; trimmed further in the M2 RAM-headroom pass.)
+ * WHY: right-size the FreeRTOS heap to measured use. Upstream sets 64 KB; measured runtime use is
+ * ~20 KB (task stacks incl. the 4 KB SD task + 4 KB timer + idle + TCBs/queues + FatFs LFN mallocs).
+ * 34 KB leaves ~14 KB free heap — ample. (Originally a copy_to_ram SRAM-pressure trim; the image now
+ * runs from flash XIP so SRAM is no longer tight — 34 KB is kept as a measured value and can be raised
+ * in M3 if the UI needs more, since there's now ~174 KB free SRAM.)
  */
 #ifndef HACKAGOTCHI_FREERTOSCONFIG_OVERLAY
 #define HACKAGOTCHI_FREERTOSCONFIG_OVERLAY

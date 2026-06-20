@@ -113,10 +113,16 @@ def main():
     if i >= 0:
         pc = last1[i + 6 : last1.find('"', i + 6)]
     pcval = int(pc, 16) if pc else 0
-    # The copy_to_ram image runs from SRAM (0x20000000-0x20042000); a sane captured PC lands there,
-    # not at 0 or some wild address — turns the PC check from 'nonzero' into 'plausible code address'.
-    if not (0x20000000 <= pcval < 0x20042000):
-        print(f"FAIL: captured PC {pc} is not a plausible SRAM code address (garbage capture?)")
+    # A sane captured PC lands in a code region, not at 0 or some wild address — turns the PC check
+    # from 'nonzero' into 'plausible code address'. Which region depends on the binary type:
+    #   * XIP (default):       code runs from flash      0x10000000-0x10200000 (2 MB)
+    #   * copy_to_ram:         code runs from SRAM        0x20000000-0x20042000
+    # Accept either so the test is valid across both layouts (and a future hybrid that pins hot
+    # functions into RAM via __not_in_flash_func).
+    in_flash = 0x10000000 <= pcval < 0x10200000
+    in_sram = 0x20000000 <= pcval < 0x20042000
+    if not (in_flash or in_sram):
+        print(f"FAIL: captured PC {pc} is not a plausible code address (flash/SRAM) — garbage capture?")
         ok = False
     if crashes1 is None or crashes0 is None or crashes1 != crashes0 + 1:
         print(f"FAIL: crash count did not advance by 1 ({crashes0} -> {crashes1})")
