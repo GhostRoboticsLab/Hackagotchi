@@ -29,7 +29,7 @@ hardware/wiring fault (the same probe+target mass-erase fine via openocd). `gate
 full mass-erase through openocd and gets the per-region sector-erase proof from `probe-rs download --verify`.
 Carry-over for the product: our own recovery/flash flows should use the bootrom block-erase, not probe-rs erase.
 
-## GATE 1 — fork + SWD-remap + OLED task survives sustained flash  ·  [ **PASS** (core claim) — robustness items deferred, see verdict ]
+## GATE 1 — fork + SWD-remap + OLED task survives sustained flash  ·  [ **PASS** — at-DAP-priority contention CLOSED at rank-1 (2026-06-20) ]
 - Fork base: `debugprobe-v2.2.3` (upstream HEAD 466432c)  Build commit **2158e3d**; soak-hardening **07c1a70** (2026-06-19)
 - **Build — DONE & statically verified:**
   - [x] Fork builds clean (pinned Arm GCC 13.3.Rel1 + pico-sdk 2.2.0, text 62520, copy_to_ram).
@@ -61,11 +61,43 @@ single-core, `i2c_write_blocking` holds no lock/IRQ, three independent periphera
 - [x] **OLED liveness** (a clean soak alone doesn't prove the panel kept looping — NAKs are swallowed, `ok` latched at boot):
       closed by operator attestation + pre-soak visual confirmation.
 - [x] **Gate doc** now records the run (this section).
-- [ ] **DEFERRED to hardware return** (needs a GP0→GP1 loopback jumper + 1 BOOTSEL — impossible while the operator is away):
-      machine-capture the OLED counter (assert monotonic) + heap series + adversarial `stall=` build-id via the loopback→CDC;
-      flash the **at-DAP-priority** variant (`ADVERSARIAL_AT_DAP_PRIO=ON`, compile-verified) for a genuine contention test (the
-      idle-priority busy_wait is preempted in ~50 µs = a weak stressor). These STRENGTHEN the verdict; the core SWD⇄dashboard
-      coexistence claim already holds on the design proof + 2200+ clean cycles + attestation.
+- [x] **CLOSED 2026-06-20 on hardware return** (see the at-DAP-priority close-out section below) — the deferred
+      machine-capture + genuine contention test are DONE at rank-1; this verdict is upgraded from PASS_WITH_BLOCKERS
+      to unconditional PASS for the at-DAP-priority contention claim.
+
+### Close-out 2026-06-20 — at-DAP-priority GENUINE contention, machine-captured (adversarial workflow wf_96721d04)
+The 5200 prior cycles were at IDLE priority (DAP preempts in ~50 µs = a weak/tautological stressor) and the running
+image was never machine-bound to the soak. Both are now fixed; a re-run adversarial workflow (4 lenses) had flagged exactly
+these as a **silent-pass risk** (a stock-image soak would have produced byte-identical evidence) and returned DO-NOT-PASS
+until bound — that binding is now done:
+- **Genuine contention build, artifact-verified (rank-2):** `build-gate1-adv` with `ADVERSARIAL_AT_DAP_PRIO=ON`
+  (DASH task at DAP priority 1 — objdump: `main` `movs r3,#1` before the 3rd `xTaskCreate`, vs `#0` in stock `build/`)
+  + `ADVERSARIAL_STALL_MS=50` (objdump: `dashboard_task` loads literal `0xc350`=50000 into `busy_wait_us`; absent in stock).
+  FreeRTOS is `configUSE_PREEMPTION=1` + `configUSE_TIME_SLICING=1` @ 50 µs tick, single-core, so a non-yielding 50 ms
+  busy_wait at DAP's own priority genuinely round-robins with DAP — NOT the idle-prio tautology.
+- **Soak A (provenance-bound, rank-2): 1000/1000, 0 fails / 0 stalls** at at-DAP-priority. Binding: AFTER the soak,
+  `picotool verify /tmp/gate1-adv-a75ff0fa.uf2` against the untouched device flash = **OK** (byte-match to the adversarial
+  image, sha `a75ff0fa…`), and the control `picotool verify build/…uf2` (stock `45aba69c…`) = **device contents did not
+  match** → the soak provably ran the adversarial image, discriminated from stock.
+- **Soak B (self-attesting, rank-1): 300/300, 0 fails / 0 stalls** on a rebuilt image that reports its own identity over
+  CDC1 (`{"fw","heap","up","n","stall_cfg","stall_us","prio"}`). Captured every 5 s throughout (`gate1_liveness.py`):
+  - `prio=1` for all 95 samples → at-DAP-priority build running (provenance from the firmware itself).
+  - `stall_us` = 50000–50049 every sample → the 50 ms busy_wait actually FIRED (the +0..49 µs overage IS DAP
+    time-slicing the busy_wait — direct evidence of genuine contention, not a number).
+  - **`n` 307 → 2189, 0 N-FROZEN events → the DASHBOARD TASK looped continuously DURING the DAP soak** — closes the
+    frozen-but-alive gap that CDC1-only/`up`-only liveness could not (CDC1 is serviced by the higher-prio TUD task).
+  - `up` monotonic 76→547 s (no reset), heap flat 51016 B, CDC1 answered every poll (USB never wedged).
+- **Verdict signal proven FALSIFIABLE (rank-1):** flash A then `probe-rs verify` B → **"Verification failed: contents do
+  not match"** (red path fires); matching image → "Verification successful". So 1300/1300 clean is a real result, not a
+  no-op count. (Confirms F1-3 live: `verify` prints failed but the script decides by stdout, not exit code.)
+- **DAP healthy after both soaks:** `probe-rs info` reads both target cores' ROM tables; final self-attest `n=2199`.
+- **Remaining DISCLOSED caveats (not blockers):** (a) heap-flat is near-vacuous — the harness does zero FreeRTOS alloc and
+  the SSD1306 framebuffer is C-lib malloc invisible to `xPortGetFreeHeapSize`; revisit at M1 with newlib instrumentation.
+  (b) A non-yielding busy_wait is a CPU-hog proxy; it does NOT exercise shared-bus (SD/SPI) or IRQ-latency contention a real
+  blocking peripheral would (plan R1 worst case). (c) The SHIP config runs DASH strictly BELOW DAP (prio 0) — this build is a
+  conservative UPPER BOUND, so passing it exceeds the product requirement.
+- Evidence: `gate1/fullsoak_*.console` + `soak_*.log` (Soak A), `gate1/resoak_*.console` + `resoak_selfattest_*.csv`
+  (Soak B), `gate1/provenance_20260620T110945.txt`. Self-attestation added in `src/cdc1_control.c` + `hackagotchi_dashboard.{c,h}`.
 
 ### Finding F1-1: debugprobe-v2.2.3 is SINGLE-CORE FreeRTOS (the engineering-plan SMP affinity model does NOT apply)
 `src/FreeRTOSConfig.h` sets `configNUM_CORES=1`; no `multicore_launch`/`vTaskCoreAffinitySet` anywhere
@@ -84,7 +116,7 @@ overlay silently had NO effect (picotool showed the stock GP12/13/14 pins). Fix:
 unmodified upstream probe_config.h `#include`s it and our copy wins for every TU. The picotool-info
 check is the guard that catches a wrong-board build.
 
-## GATE 2 — 2nd CDC: two nodes, DAP binds, JSON round-trip  ·  [ FIRMWARE FLASH-READY — VALIDATION PENDING BOOTSEL ]
+## GATE 2 — 2nd CDC: two nodes, DAP binds, JSON round-trip  ·  [ **PASS** (core) — 2026-06-20 live hardware ]
 - Device class: `0xEF/0x02/0x01` (IAD composite)  CFG_TUD_CDC=2  ·  build commit: see git log
 - **Firmware — BUILT & statically verified (no hardware; can't enumerate while operator away):**
   - [x] Builds clean (text 64340); `build/` rebuilt to the Gate-2 image — `nm` shows `tud_cdc_rx_cb`,
@@ -102,15 +134,27 @@ check is the guard that catches a wrong-board build.
   - 4-lens adversarial workflow (wf_62d07ed1): SOURCE spec-correct; the only NEEDS_FIX was a stale
     `build/` artifact (now rebuilt). Notes deferred to M1: CDC1 uses `strstr("status")` not jsmn
     (fine — gate2_cdc.py sends one clean line); `tud_cdc_n_write` return unchecked (fine for ~50 B).
-- **Validation — PENDING (needs BOOTSEL flash on operator return):**
-  - [ ] exactly TWO `/dev/cu.usbmodem*` nodes
-  - [ ] `probe-rs list`/`info` still succeed (DAP unaffected)
-  - [ ] node map by NAME — CDC0=UART: ______  CDC1=Control: ______
-  - [ ] mapping stable across 3 replug + 1 host reboot
-  - [ ] `{"q":"status"}` 100/100 valid JSON (the reply already returns `heap` → re-records the
-        FreeRTOS watermark for the +4.2 KB .bss, closing the Gate-1 heap re-measure note)
-  - [ ] CDC0 carried live UART concurrently
-  - Evidence: `gate2/`
+- **Validation — PASS on LIVE hardware (2026-06-20, attempt 2; `build/hackagotchi_probe.uf2` flashed via `picotool load -x`):**
+  - Pre-flash provenance (rank-2, decoded from the staged ELF): pins GP26/27, product "Hackagotchi Probe
+    (CMSIS-DAP)", strings "Hackagotchi UART"+"Hackagotchi Control", `tud_cdc_rx_cb` present, reply template
+    `{"fw":"Hackagotchi","heap":%u,"up":%u}` — confirmed the 2-CDC image BEFORE flashing.
+  - [x] exactly TWO `/dev/cu.usbmodem*` nodes — **usbmodem21202 + usbmodem21204**
+  - [x] `probe-rs list` still finds the probe — **"Hackagotchi Probe (CMSIS-DAP)"** — DAP binds WITH both CDCs
+        present (re-checked AFTER the 100-cycle round-trip: still bound). [a target-attached `info` IDCODE read
+        is the stronger DAP proof — captured on the Gate-1 rig, which wires a real target.]
+  - [x] node map by ROLE (behavioral, suffix-independent): **CDC0=UART = usbmodem21202** (silent to `status`),
+        **CDC1=Control = usbmodem21204** (answers JSON). macOS does not surface the iInterface strings as BSD
+        names (`ioreg` shows both as "usbmodem"), so role is keyed on behavior — more robust than a name string.
+  - [x] `{"q":"status"}` → **100/100 valid JSON** (latency avg 0.3 ms / max 0.5 ms). **NEGATIVE CONTROL:** the
+        UART node returned 0 replies to the identical request → the round-trip check genuinely discriminates and
+        CAN emit FAIL (not a tautology).
+  - [x] heap watermark machine-read live: **free=51016 B** in the reply — IDENTICAL to Gate-1's recorded 51016
+        (the +4.2 KB 2nd-CDC FIFO is `.bss`/static, NOT on the FreeRTOS heap) → **closes the Gate-1 heap
+        re-measure note** at rank-1. (`up=104 s` also confirms the monotonic clock.)
+  - [ ] DEFERRED (low-risk; operator opted to skip 2026-06-20): node-map stable across 3 replug + 1 host reboot —
+        role is behavioral/suffix-independent so the residual risk is cosmetic; CDC0 carrying live *target* UART —
+        no target-UART wire / no loopback jumper this session (the Gate-1 rig is SWD-only).
+  - Evidence: `tests/gates/gate2/roundtrip_*.log`
 
 ---
-**OVERALL:**  Gate 0 ✅ PASS (5/5)  ·  Gate 1 ✅ PASS (core claim; robustness telemetry deferred to hardware return)  ·  Gate 2 🔨 firmware flash-ready + statically verified, two-node/JSON validation pending a BOOTSEL on operator return.  Proceed to M1 (UI port) only once Gate 2 validates on hardware.
+**OVERALL (2026-06-20, hardware return):**  Gate 0 ✅ PASS (5/5)  ·  Gate 1 ✅ PASS — at-DAP-priority GENUINE contention closed at rank-1 (1000 cycles provenance-bound by `picotool verify` + 300 self-attesting cycles: dashboard `n` looped 307→2189, `stall_us`≈50000, `prio=1`, 0 fails; heap/representativeness caveats disclosed)  ·  Gate 2 ✅ PASS (core) — 2 nodes + DAP binds + 100/100 JSON live; replug-stability + CDC0-live-UART deferred (low-risk).  **All three gates pass on hardware → cleared to start M1 (UI port).**

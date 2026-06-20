@@ -49,6 +49,10 @@
 
 TaskHandle_t dashboard_taskhandle;
 
+// Self-attestation telemetry (see header). Written only here, read by cdc1_control.c's status reply.
+volatile uint32_t g_dash_counter = 0;
+volatile uint32_t g_dash_stall_us = 0;
+
 void dashboard_task(void *ptr) {
     (void)ptr;
 
@@ -75,13 +79,18 @@ void dashboard_task(void *ptr) {
 
     for (;;) {
         counter++;
+        g_dash_counter = counter;   // [HACKAGOTCHI] self-attest: proves THIS task kept looping
         unsigned freeh = (unsigned)xPortGetFreeHeapSize();
         unsigned minh  = (unsigned)xPortGetMinimumEverFreeHeapSize();
 
 #if ADVERSARIAL_STALL_MS > 0
         // Slow-SD-write proxy: a long non-yielding stall in the lowest-prio task. The DAP task must
         // preempt this and finish flashes uncorrupted — that preemption is exactly what we validate.
+        // Measure the ACTUAL elapsed time so the status reply proves the busy_wait truly fired (not
+        // optimised away), closing the Gate-1 stressor-actually-ran provenance gap at runtime.
+        uint64_t _stall_t0 = time_us_64();
         busy_wait_us((uint32_t)ADVERSARIAL_STALL_MS * 1000u);
+        g_dash_stall_us = (uint32_t)(time_us_64() - _stall_t0);
 #endif
 
         if (ok) {
