@@ -87,6 +87,11 @@ static uint8_t RxDataBuffer[CFG_TUD_HID_EP_BUFSIZE];
 // It sleeps ~all the time (500 ms cycle, microseconds of work), so the cost to UART/DAP is negligible.
 #define WD_TASK_PRIO (tskIDLE_PRIORITY + 3)
 
+// [HACKAGOTCHI] M1: the TUD task runs tud_cdc_rx_cb (the CDC1 JSON control handler) on its own stack,
+// on top of TinyUSB's own call depth. configMINIMAL_STACK_SIZE (256 words) is too tight once the
+// handler adds JSON locals — give TUD headroom. (Reply/token buffers are also moved off-stack.)
+#define TUD_TASK_STACK 512
+
 TaskHandle_t dap_taskhandle, tud_taskhandle, mon_taskhandle;
 
 // [HACKAGOTCHI] M1: SW-watchdog heartbeat (bumped each usb_thread loop) + a HIL hook that wedges the
@@ -182,7 +187,7 @@ int main(void) {
         probe_info("LAST FAULT: %s\n", crash_box_report());
 
     if (THREADED) {
-        xTaskCreate(usb_thread, "TUD", configMINIMAL_STACK_SIZE, NULL, TUD_TASK_PRIO, &tud_taskhandle);
+        xTaskCreate(usb_thread, "TUD", TUD_TASK_STACK, NULL, TUD_TASK_PRIO, &tud_taskhandle);
 #if PICO_RP2040
         xTaskCreate(dev_mon, "WDOG", configMINIMAL_STACK_SIZE, NULL, TUD_TASK_PRIO, &mon_taskhandle);
 #endif

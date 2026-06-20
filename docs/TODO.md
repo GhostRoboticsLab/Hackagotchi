@@ -41,8 +41,12 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
   - [x] **`{"q":"bootsel"}`** CDC1 command (`reset_usb_boot`) — **PASS, HIL-verified** *(2026-06-20)*:
     dropped to BOOTSEL + reflashed via `picotool` with no button. Dev loop is now hands-free.
     Recovery guarantees documented in `docs/recovery-model.md`.
-  - [ ] jsmn parser (replace `strstr`) + `next`/`prev`/`dump`; bounded SPSC UART bridge;
-    per-interface USB string descriptors; error-code+goto-cleanup idiom.
+  - [x] **jsmn parser** (replaces `strstr`) + `next`/`prev`/`dump` — **PASS, HIL-verified** *(2026-06-20)*:
+    vendored `src/jsmn.h` (MIT), bounded line buffer, structured `"q"` dispatch; `tests/m1/jsmn_hil.py`
+    proves strstr false-positives (`{"q":"statusx"}`, `{"note":"status please"}`) are now rejected +
+    fragmented requests reassemble. **Finding F1-4:** a JSON parser's locals overflowed the 1 KB TUD
+    task stack (ENXIO on CDC1) — fixed with static buffers + a 512-word TUD stack.
+  - [ ] bounded SPSC UART bridge (CDC0) hardening; per-interface USB string descriptors; error-code+goto-cleanup idiom.
   - [ ] Watchdog hardening: characterise DAP/UART/DASH cadence under flash load → monitor them +
     flip the watchdog to armed-by-default.
 - [ ] M2 SD + black-box logging (carlk3 FatFs, low-prio writer); RTC timestamps.

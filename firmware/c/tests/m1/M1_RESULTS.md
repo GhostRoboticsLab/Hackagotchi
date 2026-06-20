@@ -107,9 +107,53 @@ needs the physical button (see `docs/recovery-model.md`).
 
 **Verdict: PASS** — watchdog catches a wedged task at rank-1; the probe is now self-reflashable.
 
+---
+
+## Increment 3 — jsmn control parser (replaces strstr) — **PASS (live, 2026-06-20)**
+
+**Falsifiable claim.** CDC1 commands are matched on the STRUCTURED value of the `"q"` key via a real
+JSON parse (jsmn) over a bounded line buffer — so an input the strstr prototype would have
+FALSE-matched (e.g. `{"q":"statusx"}`, `{"note":"status please"}`) is now correctly rejected, and a
+request split across two USB packets is reassembled.
+
+**Implementation** (`src/jsmn.h` vendored MIT, `src/cdc1_control.c`, `src/main.c`):
+- jsmn (`zserge/jsmn`, header-only, `JSMN_STATIC`) parses each line; `get_q()` extracts `"q"` and
+  dispatches by exact `strcmp`. Bounded `LINE_MAX=128` line buffer accumulates CDC1 bytes until `\n`
+  (reassembles fragmented requests; over-long lines drop with `{"err":"toolong"}`).
+- Commands: `status`/`dump`/`lastfault`/`wd_arm`/`next`/`prev` (reply) + `crash`/`wd_test`/`bootsel`
+  (reboot, no reply). Errors: `badjson`/`noq`/`unknown`. `lastfault` clean state now valid JSON (`null`).
+  `status` gains `page`; `next`/`prev` move a page-nav index (M3 dashboard will consume it).
+
+**Finding F1-4 (the bug this increment hit + fixed): a JSON parser on the small USB-task stack
+overflows it.** First cut put jsmn's `jsmntok_t[16]` (256 B) + nested 200 B reply buffers (~0.5 KB of
+leaf locals) on the `configMINIMAL_STACK_SIZE` (1 KB) TUD task stack, on top of TinyUSB's own call
+depth → overflow → corrupted USB endpoint state → the host saw `[Errno 6] Device not configured`
+(ENXIO) on CDC1 reads. Tell-tale: the **shallow** `bootsel` path worked while the **deeper** `status`
+path (extra reply buffer) failed — same parse, different stack peak. Fix: move the token + reply
+buffers to `static` (the rx callback runs only in the single, non-reentrant TUD task) and bump the TUD
+stack to 512 words. **Debug note:** isolated firmware-vs-host by reflashing the known-good prior image
+(its CDC1 read fine) and by observing the bug survived a physical replug — ruling out the macOS
+USB-CDC host wedge it first looked like.
+
+**Machine assertion** (`tests/m1/jsmn_hil.py`, can fail): asserts valid commands dispatch, the two
+strstr-trap inputs return an error (NOT a status reply), malformed JSON → `badjson`, and a fragmented
+request is reassembled.
+
+**Result (live, m1d image).** All checks PASS: `status`/`dump`/`lastfault`/`next`+`prev` work;
+`{"q":"statusx"}`→`{"err":"unknown"}`, `{"note":"status please"}`→`{"err":"noq"}` (strstr would have
+matched both); `badjson`/`unknown` errors correct; fragmented `{"q":"sta`+`tus"}` reassembled.
+Regression: crash box (count→2) + watchdog (kind=watchdog/TUD, count→3) still pass; DAP still binds.
+
+**Disclosed (not blockers).** `next`/`prev` move a page index nothing consumes yet (M3). The UART
+bridge (CDC0) is still upstream's; the bounded-SPSC-ring hardening + per-interface USB string
+descriptors are not done.
+
+**Verdict: PASS** — structured JSON control dispatch verified at rank-1, including the strstr
+false-positive rejection that is the point of the increment.
+
 ### Remaining in M1 (next increments)
-- jsmn line-buffered parser replacing `strstr`; `next`/`prev`/`dump`; bounded SPSC UART bridge;
-  per-interface USB string descriptors (stable CDC0=UART / CDC1=Control naming).
+- Bounded SPSC UART bridge (CDC0) hardening; per-interface USB string descriptors (stable
+  CDC0=UART / CDC1=Control naming).
 - error-code + goto-cleanup idiom adopted for new code.
 - Watchdog hardening: characterise DAP/UART/DASH cadence under flash load, then monitor them + flip
   the watchdog to armed-by-default.
