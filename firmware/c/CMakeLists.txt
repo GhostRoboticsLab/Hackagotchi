@@ -37,6 +37,20 @@ set(ADVERSARIAL_STALL_MS 0 CACHE STRING "Gate-1 adversarial stall (ms) injected 
 # with DAP (the idle-priority stall is preempted in ~50us = a no-op threat). NOT a product config.
 option(ADVERSARIAL_AT_DAP_PRIO "Run the OLED stress task at DAP priority (adversarial contention test)" OFF)
 
+# [HACKAGOTCHI] M2: carlk3 no-OS-FatFS-SD (SDIO+SPI) for the SD black-box recorder. Fetched by
+# setup.sh into the gitignored upstream/ (same pattern as debugprobe), NOT a submodule. INTERFACE lib;
+# our src/sd/hw_config.c provides the SPI0 pin map. Requires pico_sdk_init() to have run (above).
+set(FATFS ${CMAKE_CURRENT_LIST_DIR}/upstream/no-OS-FatFS)
+if (NOT EXISTS ${FATFS}/src/CMakeLists.txt)
+    message(FATAL_ERROR "upstream/no-OS-FatFS not found — run ./setup.sh first (fetches carlk3 FatFs).")
+endif ()
+add_subdirectory(${FATFS}/src ${CMAKE_BINARY_DIR}/no-OS-FatFS)
+# Drop carlk3's src/crash.c — it defines its OWN naked isr_hardfault (collides with our src/crash_box.c)
+# and parks a buffer in .uninitialized_data. We use OUR crash box; surgically remove just that source.
+get_target_property(_fatfs_srcs no-OS-FatFS-SD-SDIO-SPI-RPi-Pico INTERFACE_SOURCES)
+list(FILTER _fatfs_srcs EXCLUDE REGEX "/src/crash\\.c$")
+set_target_properties(no-OS-FatFS-SD-SDIO-SPI-RPi-Pico PROPERTIES INTERFACE_SOURCES "${_fatfs_srcs}")
+
 add_executable(hackagotchi_probe
         # --- OUR overlay (compiled instead of the matching upstream files; see each file's header) ---
         ${CMAKE_CURRENT_LIST_DIR}/src/main.c                 # + OLED coexistence task (Gate 1)
@@ -48,6 +62,8 @@ add_executable(hackagotchi_probe
         ${CMAKE_CURRENT_LIST_DIR}/src/cdc1_control.c         # Gate 2: CDC1 JSON control handler
         ${CMAKE_CURRENT_LIST_DIR}/src/crash_box.c            # M1: post-mortem crash box + HardFault handler
         ${CMAKE_CURRENT_LIST_DIR}/src/watchdog_task.c        # M1: SW watchdog (HW WDT + per-task check-in)
+        ${CMAKE_CURRENT_LIST_DIR}/src/sd/hw_config.c         # M2: carlk3 SD pin map (SPI0 GP2/3/4/CS28)
+        ${CMAKE_CURRENT_LIST_DIR}/src/sd_gate.c              # M2: SD bring-up gate (mount/write/readback)
         # --- pristine upstream debugprobe sources ---
         ${UPSTREAM}/src/probe_config.c
         ${UPSTREAM}/src/probe.c
@@ -103,6 +119,7 @@ target_link_libraries(hackagotchi_probe PRIVATE
         pico_bootrom            # M1: reset_usb_boot for the {"q":"bootsel"} self-reflash command
         FreeRTOS-Kernel
         FreeRTOS-Kernel-Heap4   # heap_4: supports vPortFree + xPortGetMinimumEverFreeHeapSize (Gate-1 metric)
+        no-OS-FatFS-SD-SDIO-SPI-RPi-Pico  # M2: carlk3 SD/FatFs (propagates hardware_spi/dma, pico_aon_timer)
 )
 
 # Match upstream: the whole image runs from RAM (copy_to_ram) for deterministic SWD timing.

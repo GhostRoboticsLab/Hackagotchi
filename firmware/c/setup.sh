@@ -26,6 +26,19 @@ else
 fi
 echo "[setup] debugprobe @ $(git -C "$DP_DIR" describe --tags 2>/dev/null || echo "$DP_TAG")"
 
+# M2: carlk3 no-OS-FatFS-SD (SDIO+SPI) — FAT/SD library for the black-box recorder. Pinned, fetched
+# into upstream/ (gitignored), NOT a submodule — same convention as debugprobe.
+FATFS_TAG="v3.6.2"                   # latest tag (Apache-2.0; wraps ChaN FatFs R0.15)
+FATFS_REPO="https://github.com/carlk3/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico.git"
+FATFS_DIR="$UPSTREAM/no-OS-FatFS"
+if [ -d "$FATFS_DIR/.git" ]; then
+  echo "[setup] FatFs already cloned at $FATFS_DIR (tag: $(git -C "$FATFS_DIR" describe --tags 2>/dev/null || echo '?'))"
+else
+  echo "[setup] cloning $FATFS_REPO @ $FATFS_TAG ..."
+  git clone --branch "$FATFS_TAG" --depth 1 "$FATFS_REPO" "$FATFS_DIR"
+fi
+echo "[setup] FatFs @ $(git -C "$FATFS_DIR" describe --tags 2>/dev/null || echo "$FATFS_TAG")"
+
 # Pico SDK: prefer an existing PICO_SDK_PATH; otherwise fetch a pinned copy beside upstream.
 if [ -n "${PICO_SDK_PATH:-}" ] && [ -d "${PICO_SDK_PATH}" ]; then
   echo "[setup] using PICO_SDK_PATH=$PICO_SDK_PATH"

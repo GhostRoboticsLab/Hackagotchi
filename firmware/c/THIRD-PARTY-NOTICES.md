@@ -17,6 +17,8 @@ vendored in-tree (with its own `LICENSE`). This file documents what ends up in t
 | TinyUSB | USB device stack (DAP vendor + 2× CDC) | **MIT** (© hathach) | pico-sdk submodule |
 | `daschr/pico-ssd1306` | OLED driver (vendored) | **MIT** (© 2021 David Schramm) | `src/ssd1306/` (+ `LICENSE`) |
 | `zserge/jsmn` | JSON parser for the CDC1 control channel (vendored, header-only) | **MIT** (© 2010 Serge Zaitsev) | `src/jsmn.h` (license header in-file) |
+| `carlk3/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico` @ v3.6.2 | M2 SD/FAT on SPI0 (low-prio black-box writer) | **Apache-2.0** (© Carl Kugler) | fetched by `setup.sh` into `upstream/` |
+| ChaN **FatFs** R0.15 (bundled inside carlk3) | FAT filesystem core | **BSD-1-Clause-style** (© ChaN) | within the carlk3 tree (`ff15/`) |
 
 Toolchain (not linked into the binary): Arm GNU Toolchain 13.3.Rel1 (GPL — compiler, not a runtime
 dependency); the produced object code is not a derivative of the compiler.
