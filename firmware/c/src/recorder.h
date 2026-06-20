@@ -5,7 +5,8 @@
  * files, buffered flush, the VISIBLE-STOP-on-fault invariant (a black box must NEVER silently stop),
  * the wedge detector + freeze frame, trigger-term scan, heartbeat. It calls NO hardware directly —
  * only the injected recorder_hw_t seam — so the whole state machine compiles + unit-tests on the host
- * (tests/m2/recorder_test.c) with in-memory mocks. On-device the seam is wired to carlk3 FatFs + RTC.
+ * (tests/m2/recorder_test.c) with in-memory mocks. On-device the seam is wired to carlk3 FatFs +
+ * buzzer/LED; rtc_read is left NULL (the RTC was dropped) so log lines carry uptime "+Ns" stamps.
  *
  * Concurrency boundary (the device wiring): the recorder_t is owned SOLELY by the low-priority recorder
  * task — no other task touches it (no races). The high-priority producer (cdc_task) shares only (a) the
@@ -35,7 +36,8 @@ typedef enum { REC_ERR_NONE = 0, REC_ERR_SD_FULL, REC_ERR_WRITE } rec_err_t;
 
 typedef struct { uint16_t year; uint8_t mon, day, hour, min, sec; } rec_time_t;
 
-// Injected hardware seam. Device impl -> carlk3 FatFs + PCF8563 + buzzer/LED; host test -> mocks.
+// Injected hardware seam. Device impl -> carlk3 FatFs + buzzer/LED (rtc_read=NULL -> uptime stamps);
+// host test -> mocks. rtc_read is an OPTIONAL wall-clock source; NULL (or false) => uptime "+Ns" stamps.
 typedef struct {
     bool  (*sd_mounted)(void);
     int   (*sd_max_log_index)(void);                  // max NNN among log_NNN.txt (0 if none/unmounted)

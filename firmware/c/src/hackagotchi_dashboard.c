@@ -33,7 +33,7 @@
 #define ADVERSARIAL_STALL_MS 0
 #endif
 
-#define DASH_I2C_INST   i2c1    // OLED on I2C1 GP6/GP7 (shared with the RTC @0x51)
+#define DASH_I2C_INST   i2c1    // OLED on I2C1 GP6/GP7 (sole device on the bus — no mutex)
 #define DASH_REFRESH_MS 250u    // ~4 Hz (proven-safe coexistence rate from Gate 1 / M2 soaks)
 #define DASH_CYCLE_MS  6000u    // auto-advance screens every 6 s (no button)
 #define DASH_MAX_LINES    6     // attestation text lines
@@ -213,7 +213,6 @@ static void screen_home(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     ssd1306_draw_string(d, 4, 22, 1, "up"); ssd1306_draw_string(d, 20, 22, 1, up);
     ssd1306_draw_string(d, 4, 32, 1, c->snap.logging ? "REC" : "off");
     if (c->snap.alert[0]) { ssd1306_draw_string(d, 28, 32, 1, "!"); }
-    if (c->snap.rtc_valid) { char t[10]; snprintf(t, sizeof t, "%02u:%02u:%02u", c->snap.rtc.hour, c->snap.rtc.min, c->snap.rtc.sec); ssd1306_draw_string(d, 4, 42, 1, t); }
     draw_cat(d, c->active, c->frame, "RX");
     // attestation summary
     aline(s, "rx %s", rx); aline(s, "up %s", up);
@@ -290,23 +289,22 @@ static void screen_watchdog(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s)
     if (s->nlines < DASH_MAX_LINES) { snprintf(s->line[s->nlines], DASH_COLW, "ff:%s", ff); s->nlines++; }
 }
 
-// 5 — CLOCK: big wall-clock (cached RTC) + date.
-static void screen_clock(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
-    hdr(d, s, "CLOCK");
-    if (c->snap.rtc_valid) {
-        char hms[10]; snprintf(hms, sizeof hms, "%02u:%02u:%02u", c->snap.rtc.hour, c->snap.rtc.min, c->snap.rtc.sec);
-        ssd1306_draw_string(d, 16, 24, 2, hms);     // scale 2 = big
-        char dmy[16]; snprintf(dmy, sizeof dmy, "%04u-%02u-%02u", c->snap.rtc.year, c->snap.rtc.mon, c->snap.rtc.day);
-        ssd1306_draw_string(d, 22, 48, 1, dmy);
-        aline(s, "%s", hms); aline(s, "%s", dmy);
-    } else {
-        row(d, s, 1, "RTC not set");
-        row(d, s, 2, "{\"q\":\"settime\"}");
-    }
+// 5 — UPTIME: big uptime-since-boot + free heap (no RTC; the probe has no wall-clock).
+static void screen_uptime(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
+    hdr(d, s, "UPTIME");
+    uint32_t up = c->up_s;
+    char hms[12]; snprintf(hms, sizeof hms, "%02u:%02u:%02u",
+                           (unsigned)(up / 3600u), (unsigned)((up / 60u) % 60u), (unsigned)(up % 60u));
+    ssd1306_draw_string(d, 16, 22, 2, hms);          // scale 2 = big
+    char sub[22];
+    if (up >= 86400u) snprintf(sub, sizeof sub, "%ud up  heap %uK", (unsigned)(up / 86400u), (unsigned)(c->heap / 1024u));
+    else              snprintf(sub, sizeof sub, "heap %uK free", (unsigned)(c->heap / 1024u));
+    ssd1306_draw_string(d, 8, 50, 1, sub);
+    aline(s, "%s", hms); aline(s, "%s", sub);
 }
 
 static void (*const SCREENS[])(const dash_ctx_t *, ssd1306_t *, dash_screen_t *) = {
-    screen_home, screen_sniffer, screen_recorder, screen_throughput, screen_watchdog, screen_clock,
+    screen_home, screen_sniffer, screen_recorder, screen_throughput, screen_watchdog, screen_uptime,
 };
 #define N_SCREENS ((int)(sizeof(SCREENS) / sizeof(SCREENS[0])))
 int dash_screen_count(void) { return N_SCREENS; }
@@ -363,7 +361,7 @@ void dashboard_task(void *ptr) {
     static ssd1306_t disp;
     disp.external_vcc = false;   // MUST set before init (charge-pump on, else dark panel)
     bool ok = false;
-    if (i2c1_bus_lock(200)) { ok = ssd1306_init(&disp, 128, 64, DASH_I2C_ADDR, DASH_I2C_INST); i2c1_bus_unlock(); }
+    ok = ssd1306_init(&disp, 128, 64, DASH_I2C_ADDR, DASH_I2C_INST);   // sole bus owner — no lock
 
     static dash_ctx_t ctx;          // static: keep the snapshot copy off the 4 KB task stack
     static dash_screen_t scr;
@@ -415,14 +413,11 @@ void dashboard_task(void *ptr) {
         if (ok) {
             ssd1306_clear(&disp);
             SCREENS[idx](&ctx, &disp, &scr);
-            // Tick the show-success counter ONLY when the panel ACKed the burst (ssd1306_show >= 0), not
-            // merely when the bus mutex was acquired — so a NAKing/absent OLED gives shows < loops (the
-            // genuine dark-panel detector, per the M3 closeout audit).
-            if (i2c1_bus_lock(200)) {
-                int w = ssd1306_show(&disp);
-                i2c1_bus_unlock();
-                if (w >= 0) g_dash_shows++;
-            }
+            // Tick the show-success counter ONLY when the panel ACKed the burst (ssd1306_show >= 0) — so a
+            // NAKing/absent OLED (or a 1 MHz bus a board's pullups can't sustain) gives shows < loops, the
+            // genuine dark-panel / FM+ integrity detector (per the M3 closeout audit).
+            int w = ssd1306_show(&disp);
+            if (w >= 0) g_dash_shows++;
         } else {
             SCREENS[idx](&ctx, &disp, &scr);   // still publish attestation even if the panel is absent
         }

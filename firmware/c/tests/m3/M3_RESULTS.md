@@ -248,3 +248,38 @@ fails are the known negligible caveat, not an M3 regression (two of the three ru
 
 Build: `BUILD_DIR=/tmp/hg-build-m33b ./build_fork.sh`. Device resting on `/tmp/hg-build-m33b`
 (full M3: feedback HAL + snapshot boundary + 6 screens + cat + event feedback, audit-hardened).
+
+---
+
+## Post-M3 simplification — RTC dropped, I2C1 → FM+ single-owner (no mutex) — **DONE, HIL-verified (2026-06-21)**
+
+The product doesn't need a wall-clock, so the PCF8563 RTC was dropped. That removed the ONLY second user of
+I2C1 (the RTC at 0x51 on the SD task; the OLED at 0x3C on the dashboard task was the other). With the OLED
+now the SOLE device on the bus and the dashboard its only user, the bus mutex protected nothing — so it was
+deleted too. I2C1 was raised to **Fast-mode Plus (1 MHz)** for a snappier full-frame flush (~1024 B:
+~23 ms @ 400 kHz → ~9 ms @ 1 MHz). Net: a whole class of cross-task coupling on the OLED path is gone,
+clearing the way for the M4 UI work.
+
+**Changed:** deleted `rtc_pcf8563.{c,h}` + `tests/m2/rtc_hil.py`; `i2c1_bus.{c,h}` lost the mutex +
+`i2c1_bus_lock/unlock` (init-only now, `I2C1_BUS_HZ` 400000→1000000); the dashboard `ssd1306_init/show` run
+unlocked (the ACK-gated show counter is unchanged — it's now also the FM+ integrity detector);
+`sd_gate.{c,h}` lost the RTC cache/poll + settime latch + the snapshot's `rtc`/`rtc_valid`; the recorder
+seam's `rtc_read` is left **NULL** on device, so `recorder.c`'s existing null-check stamps log lines with
+the uptime fallback (`+Ns`) — recorder core + host tests untouched; CDC1 lost `{"q":"time"}` /
+`{"q":"settime"}` (and the now-dead `get_str` helper); screen 5 **CLOCK → UPTIME** (big uptime-since-boot +
+free heap — a probe with no wall-clock has no clock to show, but uptime is genuinely useful).
+
+**HIL (build `/tmp/hg-build-nortc`, I2C1 @ 1 MHz):**
+- `screen_hil.py` **PASS** — 6 screens (5=UPTIME), nav/wrap/clamp/auto-cycle, **shows == loops** every
+  sample (the OLED ACKs every burst at 1 MHz — the FM+ electrical proof). Also fixed a brittle check: "no
+  crash from the clamp" asserted `crashes==0` absolutely, a false-fail right after a `{"q":"bootsel"}` flash
+  (which counts as one reset) — now delta-based (the clamp must add zero crashes).
+- `feedback_hil.py` **PASS** — buzzer + NeoPixel events intact; recorder alerts now carry uptime stamps
+  (`WEDGE +87s`, `RECOVERED`) — the `rtc_read=NULL` → uptime path proven end-to-end.
+- **R1 coexist soak = 0 STALLS / 300 ops**, 1 retryable 0-stall DAP fail (0.33%, the documented ~1% SD-DMA
+  caveat), recorder flawless (err=0, logging=1, wedge=0, rec_drop=0, rx 0→341k, tail intact) — removing the
+  mutex + going FM+ did NOT perturb DAP.
+- **Visual: crisp at 1 MHz** (operator-confirmed) — clean text/cat/sparkline, no garbage rows/flicker, so
+  the FM+ edges hold on this board's pullups (ACK + visual together = bus + data integrity).
+
+Device resting on `/tmp/hg-build-nortc`. **Opens the gates for M4.**

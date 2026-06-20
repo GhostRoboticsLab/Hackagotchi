@@ -5,9 +5,10 @@
  * at the LOWEST priority (tskIDLE_PRIORITY), so the DAP/UART/USB tasks always preempt it and the ~23 ms
  * ssd1306_show() I2C burst never sits on the probe hot path (R1; proven by the M2 coexist soak).
  *
- * Concurrency: the dashboard READS recorder/RTC state ONLY via the SD-task-published snapshot
- * (dash_get_rec_snapshot, sd_gate.h) — it never touches g_rec/the freeze ring/the RTC directly (the M2
- * two-ring rule). Its only i2c1_bus_lock is ssd1306_show(); time comes from the snapshot's cached clock.
+ * Concurrency: the dashboard READS recorder state ONLY via the SD-task-published snapshot
+ * (dash_get_rec_snapshot, sd_gate.h) — it never touches g_rec/the freeze ring directly (the M2 two-ring
+ * rule). The OLED is the SOLE device on I2C1 and the dashboard its only user, so the bus needs no mutex —
+ * ssd1306_show() runs unlocked, ACK-gated (shows < loops on a dark/NAKing panel).
  *
  * Input: there is NO physical button (GP27 became SWDIO at Gate 1). Screens advance on an auto-cycle
  * timer and via CDC1 (dash_nav_step / dash_nav_to). The dashboard is the SOLE owner of the screen index;

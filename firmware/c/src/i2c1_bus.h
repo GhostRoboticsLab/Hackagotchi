@@ -1,25 +1,23 @@
 /*
- * Hackagotchi — shared I2C1 bus. SPDX-License-Identifier: MIT
+ * Hackagotchi — I2C1 bus bring-up. SPDX-License-Identifier: MIT
  *
- * GP6 SDA / GP7 SCL @ 400 kHz. The OLED (0x3C, DASH task) and the PCF8563 RTC (0x51, SD/recorder task)
- * share this bus from DIFFERENT FreeRTOS tasks, so every transaction MUST hold the bus mutex. Init is
- * idempotent and done once from main() before the scheduler starts, so the mutex exists before any
- * task takes it.
+ * GP6 SDA / GP7 SCL. After the RTC was dropped the OLED (0x3C) is the SOLE device on this bus and the
+ * dashboard task is its ONLY user — there is no cross-task sharing, so NO mutex: the task owns the bus
+ * outright. Run at Fast-mode Plus (1 MHz) for a snappier full-frame flush (~1024 B: ~23 ms @ 400 kHz ->
+ * ~9 ms @ 1 MHz). FM+ leans on the Seeed expansion board's external pullups (the internal pulls are far
+ * too weak at 1 MHz); HIL-proven via the show-success counter (panel still ACKs) + a visual integrity
+ * check — fall back to 400000u if a board's pullups can't sustain 1 MHz. Init is idempotent, done once.
  */
 #ifndef HACKAGOTCHI_I2C1_BUS_H
 #define HACKAGOTCHI_I2C1_BUS_H
 
-#include <stdbool.h>
-#include <stdint.h>
 #include "hardware/i2c.h"
 
 #define I2C1_BUS_INST i2c1
 #define I2C1_BUS_SDA  6u
 #define I2C1_BUS_SCL  7u
-#define I2C1_BUS_HZ   400000u
+#define I2C1_BUS_HZ   1000000u   // Fast-mode Plus; was 400000u (Fast-mode) while shared with the RTC
 
-void i2c1_bus_init(void);                 // idempotent: i2c_init + gpio funcs + pullups + create mutex
-bool i2c1_bus_lock(uint32_t timeout_ms);  // take the bus; false if not acquired (caller must skip I/O)
-void i2c1_bus_unlock(void);
+void i2c1_bus_init(void);        // idempotent: i2c_init + gpio funcs + pullups (no mutex — single owner)
 
 #endif /* HACKAGOTCHI_I2C1_BUS_H */

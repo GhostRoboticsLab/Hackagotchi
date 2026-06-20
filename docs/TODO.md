@@ -125,6 +125,12 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     status); `{"q":"time"}`/`{"q":"settime"}` rerouted off the above-DAP TUD task (snapshot read + SD-task
     apply); filename check de-tautologised; auto-cycle test hardened. probe-active DEFERRED with a recipe.
     Final coexist R1 soak 0/0 rec_drop=0.
+- [x] **Post-M3: drop RTC, I2C1 → FM+ 1 MHz single-owner, remove the bus mutex** — **PASS, HIL-verified**
+    *(2026-06-21)*: per user, the product needs no wall-clock. Deleting the PCF8563 left the OLED the sole
+    I2C1 device (dashboard-only), so the mutex + `i2c1_bus_lock/unlock` + `{"q":"time"}`/`{"q":"settime"}`
+    are gone; `rtc_read=NULL` → recorder stamps uptime (`+Ns`); screen 5 CLOCK→UPTIME; I2C1 at 1 MHz.
+    `screen_hil`/`feedback_hil` PASS (shows==loops at 1 MHz), coexist R1 = 0 stalls/300 ops, OLED visually
+    crisp at FM+. Simplifies the OLED path ahead of M4. See M3_RESULTS.md "Post-M3 simplification".
 - [ ] M4 full UI parity (Macro/Baud/SD-explorer via CDC1+snapshot redesign); M5 polish + tagged release (.uf2 + .elf).
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,
   tighter analyzers, RTT observability.

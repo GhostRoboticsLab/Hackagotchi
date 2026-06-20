@@ -19,7 +19,6 @@
 #include "probe_config.h"  // PROBE_UART_BAUDRATE (header baud)
 #include "recorder.h"
 #include "uart_bridge.h"
-#include "rtc_pcf8563.h"   // M2.4: PCF8563 wall-clock for log stamps
 #include "feedback.h"      // M3.0: non-blocking LED/buzzer service (serviced from this low-prio task)
 
 TaskHandle_t sd_gate_taskhandle;
@@ -97,19 +96,14 @@ static int hw_write(void *h, const void *buf, size_t n) {
 }
 static void hw_close(void *h) { f_close((FIL *)h); }            // close flushes -> durable per session-flush
 static bool hw_fault_full(void) { return s_log_fr == FR_DENIED; }  // FatFs "disk full"
-static bool hw_rtc_read(rec_time_t *t) {                            // PCF8563 wall-clock; false => uptime fallback
-    rtc_dt_t dt;
-    if (!rtc_pcf8563_read(&dt)) return false;                      // absent / I2C error / VL set (untrusted)
-    t->year = dt.year; t->mon = dt.mon; t->day = dt.day;
-    t->hour = dt.hour; t->min = dt.min; t->sec = dt.sec;
-    return true;
-}
 static void hw_alert(const char *text, int lo, int hi) {
     (void)lo; (void)hi;
     snprintf(s_alert, sizeof s_alert, "%s", text);
 }
+// rtc_read = NULL: the RTC was dropped, so the recorder stamps log lines with the uptime fallback
+// ("+Ns") — recorder.c's stamp() null-checks the seam (this build has no wall-clock device).
 static const recorder_hw_t REC_HW = {
-    hw_mounted, hw_max_log_index, hw_open_append, hw_write, hw_close, hw_fault_full, hw_rtc_read, hw_alert
+    hw_mounted, hw_max_log_index, hw_open_append, hw_write, hw_close, hw_fault_full, NULL, hw_alert
 };
 
 // ---- async tail read (CDC1 {"q":"tail"} content proof; the read happens HERE, off the hot path) ----
@@ -144,15 +138,6 @@ void sd_recgen_set(bool on) { s_recgen = on; }
 // are belt-and-braces (the real protection on single-core RP2040 is the seq-retry against preemption).
 static volatile uint32_t s_snap_seq = 0;
 static rec_snapshot_t    s_snap;            // the published copy
-static rtc_dt_t          s_rtc_cache;       // wall-clock cached here (~1 Hz) so the dashboard never
-static bool              s_rtc_valid = false;  //   takes the i2c1 bus for time — only the OLED show does
-static uint32_t          s_rtc_poll_ms = 0;
-
-// M3 closeout: {"q":"settime"} latches a request consumed by THIS (SD) task, so the i2c1 RTC write never
-// runs on the TUD task (idle+2, ABOVE DAP) — keeps every i2c1 contender at idle+0 (no PI on the DAP path).
-static volatile bool s_settime_pending = false;
-static rtc_dt_t      s_settime_val;
-void sd_settime_request(const rtc_dt_t *t) { s_settime_val = *t; s_settime_pending = true; }
 
 static void publish_snapshot(void) {
     rec_snapshot_t s;
@@ -169,7 +154,6 @@ static void publish_snapshot(void) {
     s.sd_mounted = s_mounted;
     s.rec_drop   = uart_bridge_rec_drops();
     snprintf(s.alert, sizeof s.alert, "%s", s_alert);
-    s.rtc_valid  = s_rtc_valid;  s.rtc = s_rtc_cache;
 
     s_snap_seq++;                              // -> odd (write in progress)
     __atomic_thread_fence(__ATOMIC_RELEASE);
@@ -238,18 +222,6 @@ void sd_gate_task(void *ptr) {
         }
         recorder_tick(&g_rec, now, uart_bridge_rx_last_ms(), uart_bridge_rx_ever());
         if (s_tail_req) { do_tail_read(); s_tail_req = false; }
-        // M3: cache the wall-clock here (~1 Hz) so the dashboard renders time with ZERO i2c1 access —
-        // only the OLED show takes the bus, keeping the i2c1 contenders at two (no extra RTC reader).
-        if (s_settime_pending) {   // host {"q":"settime"} — applied HERE (idle+0), never on the TUD task
-            s_settime_pending = false;
-            if (rtc_pcf8563_set(&s_settime_val)) { s_rtc_cache = s_settime_val; s_rtc_valid = true; s_rtc_poll_ms = now; }
-        }
-        if (now - s_rtc_poll_ms >= 1000u) {
-            s_rtc_poll_ms = now;
-            rtc_dt_t dt;
-            if (rtc_pcf8563_read(&dt)) { s_rtc_cache = dt; s_rtc_valid = true; }
-            else s_rtc_valid = false;
-        }
         publish_snapshot();          // M3: hand the dashboard + CDC1 a consistent copy of recorder state
         drive_feedback();            // M3.3: map recorder events -> buzzer + NeoPixel (edge-detected)
         feedback_service(now);       // M3.0: apply the latched beep/pixel + buzzer-off, off the hot path

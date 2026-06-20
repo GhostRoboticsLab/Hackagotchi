@@ -59,7 +59,7 @@
 #include "crash_box.h"               // [HACKAGOTCHI] M1 reliability core — post-mortem fault box
 #include "watchdog_task.h"           // [HACKAGOTCHI] M1 reliability core — SW watchdog
 #include "sd_gate.h"                 // [HACKAGOTCHI] M2 — SD bring-up gate (low-prio SD/FatFs task)
-#include "i2c1_bus.h"                // [HACKAGOTCHI] M2 — shared I2C1 (OLED + PCF8563 RTC), bus mutex
+#include "i2c1_bus.h"                // [HACKAGOTCHI] I2C1 bring-up (OLED only, FM+ 1 MHz, no mutex)
 #include "feedback.h"               // [HACKAGOTCHI] M3.0 — status LEDs + buzzer (non-blocking HAL)
 
 // UART0 for debugprobe debug
@@ -196,8 +196,8 @@ int main(void) {
     if (crash_box_init())
         probe_info("LAST FAULT: %s\n", crash_box_report());
 
-    // [HACKAGOTCHI] M2: bring up the shared I2C1 bus + its mutex ONCE here, before any task runs, so the
-    // DASH (OLED) and SD (PCF8563 RTC) tasks can both lock it safely from the first tick.
+    // [HACKAGOTCHI] Bring up I2C1 ONCE here, before any task runs. The OLED (0x3C) is the only device on
+    // the bus and the dashboard task is its only user, so there is no mutex — the task owns the bus.
     i2c1_bus_init();
 
     // [HACKAGOTCHI] M3.0: bring up the status LEDs (GP17/GP16) + buzzer (GP29) silent/off. The actual

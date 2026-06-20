@@ -5,7 +5,7 @@
  * The microSD ground-truth pin lock (mirror of board_hackagotchi_config.h for SWD):
  *   SPI0  SCK=GP2 (D8), MOSI=GP3 (D10), MISO=GP4 (D9), CS=GP28 (D2).
  * These are STATICALLY owned by the SD bus — no runtime re-mux (c-firmware-analysis.md:75). SWD lives
- * on GP26/GP27 specifically to keep this bus free; OLED/RTC are on I2C1 (GP6/7); UART tap on GP0/1.
+ * on GP26/GP27 specifically to keep this bus free; the OLED is on I2C1 (GP6/7); UART tap on GP0/1.
  * GP28 is not an SPI0 HW pin (it's SPI1_RX) but CS is a plain software-driven GPIO here, so it's fine.
  */
 

@@ -35,7 +35,6 @@
 #include "watchdog_task.h"          // wd_arm + g_tud_wedge (watchdog control + HIL test)
 #include "uart_bridge.h"            // uart ring stats + loopback toggle (CDC0 bridge HIL test)
 #include "sd_gate.h"                // M2: SD bring-up self-test result ({"q":"sd"})
-#include "rtc_pcf8563.h"            // M2.4: PCF8563 RTC read/set ({"q":"time"} / {"q":"settime"})
 #include "feedback.h"               // M3.0: LED/buzzer HW-reconciliation test commands
 
 // Build-discriminating tags compiled into the status reply so the RUNNING firmware proves its OWN
@@ -145,21 +144,6 @@ static bool get_q(const char *js, const jsmntok_t *tok, int ntok, char *out, siz
   return false;
 }
 
-// Copy the string value of top-level key `key` into out[]. Returns true iff found as a string value.
-static bool get_str(const char *js, const jsmntok_t *tok, int ntok,
-                    const char *key, char *out, size_t outsz) {
-  for (int i = 1; i + 1 < ntok; i++) {
-    if (tok_eq(js, &tok[i], key) && tok[i + 1].type == JSMN_STRING) {
-      int vlen = tok[i + 1].end - tok[i + 1].start;
-      if (vlen <= 0 || (size_t) vlen >= outsz) return false;
-      memcpy(out, js + tok[i + 1].start, (size_t) vlen);
-      out[vlen] = '\0';
-      return true;
-    }
-  }
-  return false;
-}
-
 // Read the integer value of top-level key `key` (a jsmn PRIMITIVE number). atoi() stops at the token's
 // trailing delimiter (the value isn't NUL-terminated in `js`, but ',' / '}' bounds it). Returns true iff found.
 static bool get_int(const char *js, const jsmntok_t *tok, int ntok, const char *key, int *out) {
@@ -237,31 +221,6 @@ static void handle_line(uint8_t itf, const char *line, int len) {
     feedback_pixel(CLAMP8(rr), CLAMP8(gg), CLAMP8(bb));
     #undef CLAMP8
     char r[48]; snprintf(r, sizeof r, "{\"pixel\":[%d,%d,%d]}\n", rr, gg, bb); reply(itf, r); return;
-  }
-  // M2.4: PCF8563 RTC (I2C1 @0x51, bus-mutexed with the OLED). {"q":"time"} reads;
-  // {"q":"settime","t":"YYYY-MM-DD HH:MM:SS"} sets the clock (clears the VL low-voltage flag).
-  // M3 closeout: read the CACHED clock from the published snapshot — do NOT take the i2c1 bus from this
-  // (TUD, idle+2 > DAP) task, which would let a host time command PI-perturb DAP via the OLED bus hold.
-  if (!strcmp(q, "time")) {
-    rec_snapshot_t s; char r[64];
-    if (dash_get_rec_snapshot(&s) && s.rtc_valid)
-      snprintf(r, sizeof r, "{\"rtc\":1,\"valid\":1,\"t\":\"%04u-%02u-%02u %02u:%02u:%02u\"}\n",
-               (unsigned)s.rtc.year, (unsigned)s.rtc.mon, (unsigned)s.rtc.day,
-               (unsigned)s.rtc.hour, (unsigned)s.rtc.min, (unsigned)s.rtc.sec);
-    else
-      snprintf(r, sizeof r, "{\"rtc\":1,\"valid\":0}\n");
-    reply(itf, r); return;
-  }
-  if (!strcmp(q, "settime")) {
-    char ts[24];
-    if (!get_str(line, tok, n, "t", ts, sizeof ts)) { reply(itf, "{\"err\":\"not\"}\n"); return; }
-    unsigned y, mo, d, h, mi, s;
-    if (sscanf(ts, "%u-%u-%u %u:%u:%u", &y, &mo, &d, &h, &mi, &s) != 6) {
-      reply(itf, "{\"err\":\"badtime\"}\n"); return;
-    }
-    rtc_dt_t dt = { (uint16_t)y, (uint8_t)mo, (uint8_t)d, (uint8_t)h, (uint8_t)mi, (uint8_t)s };
-    sd_settime_request(&dt);   // applied by the SD task (idle+0); confirm via a follow-up {"q":"time"}
-    reply(itf, "{\"set\":\"queued\"}\n"); return;
   }
   // M3 closeout HIL: feedback-layer readback — proves drive_feedback drove the buzzer/NeoPixel on events.
   if (!strcmp(q, "fb")) {

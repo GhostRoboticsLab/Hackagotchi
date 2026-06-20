@@ -37,7 +37,8 @@ def main():
         nonlocal ok
         print(("  OK  " if c else "  FAIL") + " " + m); ok = ok and c
 
-    # M3.2 screen order: 0 HOME(cat) · 1 SNIFFER · 2 RECORDER · 3 THROUGHPUT · 4 WATCHDOG · 5 CLOCK
+    # screen order: 0 HOME(cat) · 1 SNIFFER · 2 RECORDER · 3 THROUGHPUT · 4 WATCHDOG · 5 UPTIME
+    # (was 5 CLOCK before the RTC was dropped; the probe has no wall-clock, so screen 5 shows uptime)
     ctrl('{"q":"screen","n":0}'); time.sleep(0.5)
     sc0 = ctrl('{"q":"screen"}'); print("screen0:", sc0)
     chk(sc0.get("screen") == 0, "on screen 0")
@@ -57,17 +58,22 @@ def main():
     chk(bool(re.fullmatch(r"log_\d+\.txt", f)) and f in sc2.get("text", ""),
         "RECORDER shows the live log_NNN.txt filename (non-empty, matches the snapshot)")
 
-    for nm, n, key in [("THROUGHPUT", 3, "THROUGHPUT"), ("WATCHDOG", 4, "WATCHDOG"), ("CLOCK", 5, "CLOCK")]:
+    for nm, n, key in [("THROUGHPUT", 3, "THROUGHPUT"), ("WATCHDOG", 4, "WATCHDOG"), ("UPTIME", 5, "UPTIME")]:
         ctrl('{"q":"screen","n":%d}' % n); time.sleep(0.5)
         chk(key in ctrl('{"q":"screen"}').get("text", ""), f"screen {n} = {nm}")
 
     ctrl('{"q":"screen","n":0}'); ctrl('{"q":"prev"}'); time.sleep(0.5)
     chk(ctrl('{"q":"screen"}').get("screen") == 5, "prev from 0 wraps to last screen (5)")
 
+    crashes_before = ctrl('{"q":"status"}').get("crashes", -1)
     ctrl('{"q":"screen","n":99}'); time.sleep(0.5)
     scC = ctrl('{"q":"screen"}'); print("after n=99:", scC.get("screen"))
     chk(0 <= scC.get("screen", -1) < scC.get("n", 0), "out-of-range clamped (no hardfault)")
-    chk(ctrl('{"q":"status"}').get("crashes", -1) == 0, "no crash from the clamp")
+    crashes_after = ctrl('{"q":"status"}').get("crashes", -2)
+    # Assert the clamp INCREMENTS crashes by zero — NOT that crashes==0. A fresh flash reboots via
+    # {"q":"bootsel"} (reset_usb_boot), which legitimately counts as one reset, so an absolute ==0 was a
+    # false-fail immediately after flashing. What this check actually proves is "the clamp added no crash".
+    chk(crashes_after == crashes_before >= 0, f"no crash from the clamp (crashes {crashes_before}->{crashes_after})")
 
     # auto-cycle is DASH_CYCLE_MS = 6 s; wait > one full cycle but < two, assert exactly one advance
     ctrl('{"q":"screen","n":0}'); time.sleep(0.5)
