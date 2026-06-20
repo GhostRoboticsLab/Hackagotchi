@@ -30,8 +30,15 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
   round-trip 100/100; node mapping stable across 3 replug + 1 reboot.
 
 ## After gates pass — build the firmware (engineering-plan M1–M5)
-- [ ] M1 probe + bridge + CDC1 control + **reliability core** (fault handler/crash-box,
-  SW-watchdog, stack/malloc hooks, error-code+goto-cleanup idiom).
+- [~] **M1 probe + bridge + CDC1 control + reliability core** — IN PROGRESS (`tests/m1/M1_RESULTS.md`).
+  - [x] **Crash box** (fault handler/crash-box + stack/malloc hooks routed to it) — **PASS, HIL-verified**
+    *(2026-06-20)*: `isr_hardfault` overlay captures the M0+ exception frame to `.uninitialized_data`
+    (survives the watchdog reboot — verified outside the bss clear), surfaced via CDC1 `{"q":"lastfault"}`;
+    `tests/m1/crashbox_hil.py` forces a fault and asserts capture+survival+re-enumeration (0→1).
+  - [ ] **SW-watchdog task** (per-task check-in counters feed the HW WDT) — needs its own HIL test.
+  - [ ] `{"q":"bootsel"}` CDC1 command (`reset_usb_boot`) to reflash without a manual BOOTSEL.
+  - [ ] jsmn parser (replace `strstr`) + `next`/`prev`/`dump`; bounded SPSC UART bridge;
+    per-interface USB string descriptors; error-code+goto-cleanup idiom.
 - [ ] M2 SD + black-box logging (carlk3 FatFs, low-prio writer); RTC timestamps.
 - [ ] M3 core screens; M4 full UI parity; M5 polish + tagged release (.uf2 + .elf).
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,

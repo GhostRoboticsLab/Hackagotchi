@@ -14,6 +14,7 @@
 #include "task.h"
 #include "tusb.h"
 #include "hackagotchi_dashboard.h"  // g_dash_counter, g_dash_stall_us (self-attestation telemetry)
+#include "crash_box.h"              // M1: lastfault readout + the crash HIL self-test
 
 // Build-discriminating tags compiled into the status reply so the RUNNING firmware proves its OWN
 // identity (closes the Gate-1 provenance gap: stock vs adversarial probe images were otherwise
@@ -42,6 +43,26 @@ void tud_cdc_rx_cb(uint8_t itf)
   if (n == 0) return;
   buf[n] = '\0';
 
+  // M1 crash-box HIL self-test: force a real HardFault on demand so the gate can prove the box
+  // captures a fault and surfaces it after the reboot. The store to an UNMAPPED address (0xF0000000
+  // is outside every RP2040 region) bus-errors -> HardFault; the recorded PC lands in this file.
+  // Does not return (the device reboots); no reply is sent — the host detects the re-enumeration.
+  if (strstr(buf, "crash")) {
+    *(volatile uint32_t *)0xF0000000u = 0xDEADBEEFu;
+    return;  // unreachable
+  }
+
+  // M1: serve the last captured post-mortem (or {"fault":"none"} when clean).
+  if (strstr(buf, "lastfault")) {
+    char reply[200];
+    int len = snprintf(reply, sizeof reply, "{\"fault\":%s}\n", crash_box_report());
+    if (len > 0) {
+      tud_cdc_n_write(itf, reply, (uint32_t) len);
+      tud_cdc_n_write_flush(itf);
+    }
+    return;
+  }
+
   // Minimal request match for Gate 2: any line containing "status" -> one-line JSON reply.
   // Full {"q":"..."} jsmn parsing is deferred to M1; Gate 2 only requires a valid JSON round-trip.
   if (strstr(buf, "status")) {
@@ -53,10 +74,11 @@ void tud_cdc_rx_cb(uint8_t itf)
     // adversarial busy_wait actually FIRED (~50000us), stall_cfg+prio identify WHICH build is running.
     int len = snprintf(reply, sizeof reply,
                        "{\"fw\":\"Hackagotchi\",\"heap\":%u,\"up\":%u,"
-                       "\"n\":%u,\"stall_cfg\":%d,\"stall_us\":%u,\"prio\":%d}\n",
+                       "\"n\":%u,\"stall_cfg\":%d,\"stall_us\":%u,\"prio\":%d,\"crashes\":%u}\n",
                        heap, up,
                        (unsigned) g_dash_counter, (int) ADVERSARIAL_STALL_MS,
-                       (unsigned) g_dash_stall_us, (int) HACKA_DASH_PRIO);
+                       (unsigned) g_dash_stall_us, (int) HACKA_DASH_PRIO,
+                       (unsigned) crash_box_count());
     if (len > 0) {
       tud_cdc_n_write(itf, reply, (uint32_t) len);
       tud_cdc_n_write_flush(itf);

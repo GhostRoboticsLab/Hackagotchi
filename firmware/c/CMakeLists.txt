@@ -45,6 +45,7 @@ add_executable(hackagotchi_probe
         ${CMAKE_CURRENT_LIST_DIR}/src/usb_descriptors.c      # Gate 2: 2nd CDC + IAD composite
         ${CMAKE_CURRENT_LIST_DIR}/src/cdc_uart.c             # Gate 2: itf-guard the CDC class callbacks
         ${CMAKE_CURRENT_LIST_DIR}/src/cdc1_control.c         # Gate 2: CDC1 JSON control handler
+        ${CMAKE_CURRENT_LIST_DIR}/src/crash_box.c            # M1: post-mortem crash box + HardFault handler
         # --- pristine upstream debugprobe sources ---
         ${UPSTREAM}/src/probe_config.c
         ${UPSTREAM}/src/probe.c
@@ -95,6 +96,7 @@ target_link_libraries(hackagotchi_probe PRIVATE
         tinyusb_board
         hardware_pio
         hardware_i2c            # OLED coexistence task
+        hardware_watchdog       # M1 crash box: watchdog_reboot + scratch-register mirror
         FreeRTOS-Kernel
         FreeRTOS-Kernel-Heap4   # heap_4: supports vPortFree + xPortGetMinimumEverFreeHeapSize (Gate-1 metric)
 )

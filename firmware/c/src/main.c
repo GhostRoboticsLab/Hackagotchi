@@ -56,6 +56,7 @@
 #include "DAP.h"
 #include "hardware/structs/usb.h"
 #include "hackagotchi_dashboard.h"   // [HACKAGOTCHI] 1/3
+#include "crash_box.h"               // [HACKAGOTCHI] M1 reliability core — post-mortem fault box
 
 // UART0 for debugprobe debug
 // UART1 for debugprobe to target device
@@ -156,6 +157,12 @@ int main(void) {
     DAP_Setup();
 
     probe_info("Welcome to debugprobe!\n");
+
+    // [HACKAGOTCHI] M1: surface any post-mortem from the previous run (the probe usually runs with
+    // nothing attached to debug IT, so this is the only place a silent fault becomes visible). The
+    // record is also served on demand over CDC1 (`{"q":"lastfault"}`).
+    if (crash_box_init())
+        probe_info("LAST FAULT: %s\n", crash_box_report());
 
     if (THREADED) {
         xTaskCreate(usb_thread, "TUD", configMINIMAL_STACK_SIZE, NULL, TUD_TASK_PRIO, &tud_taskhandle);
@@ -293,12 +300,16 @@ void vApplicationTickHook (void)
 {
 };
 
+// [HACKAGOTCHI] M1: route the two FreeRTOS-detected faults into the crash box (capture + reboot
+// with a surviving post-mortem) instead of a bare panic() that halts with no trace on a probe-less
+// device. (Also fixes the upstream `*pcTaskName` bug — %s wants the char*, not a dereferenced char.)
 void vApplicationStackOverflowHook(TaskHandle_t Task, char *pcTaskName)
 {
-  panic("stack overflow (not the helpful kind) for %s\n", *pcTaskName);
+  (void)Task;
+  crash_box_panic_stack_overflow(pcTaskName);
 }
 
 void vApplicationMallocFailedHook(void)
 {
-  panic("Malloc Failed\n");
+  crash_box_panic_malloc_failed();
 };
