@@ -69,8 +69,11 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     recorder→SD; `{"q":"rec"}`/`{"q":"tail"}`. Clean payload + heartbeat + WEDGE+freeze on the card
     (log_007), session# increments across reboots, DAP intact. Fixed a real bug: probe stdio was on GP0
     (bridge TX) polluting the target line — removed stdio_uart_init + the Gate-1 dashboard printf.
+  - [x] **RAM-headroom pass** — **DONE, HIL-verified** *(2026-06-20)*: 98%→87% (−30 KB, free SRAM
+    4.5→34 KB). ffconf overlay (exFAT/LBA64/mkfs/expand off → ff.c 46→29 KB) + dropped unused SDIO
+    (~11 KB, SPI-only + 2 stubs) + heap 44→34 KB. FatFs/recorder/M1 all verified intact. copy_to_ram kept.
   - [ ] **SD-write-during-flash coexistence soak** (heavy R1 proof) + RTC timestamps (PCF8563 @0x51,
-    i2c1 mutex'd with OLED). RAM 98% → FF_USE_LFN=0 (rename hg_sdgate→8.3) reclaims headroom.
+    i2c1 mutex'd with OLED).
 - [ ] M3 core screens; M4 full UI parity; M5 polish + tagged release (.uf2 + .elf).
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,
   tighter analyzers, RTT observability.

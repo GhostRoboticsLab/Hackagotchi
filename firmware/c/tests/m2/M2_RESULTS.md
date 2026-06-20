@@ -136,6 +136,24 @@ freeze frame, robust session numbering, DAP coexistence. The probe no longer pol
 - The sustained **SD-write-during-flash coexistence soak** (the heavy R1 proof — recorder writing
   continuously while a target is flashed) is the next step; basic coexistence (DAP binds with the
   recorder running + logging) holds.
-- **RAM 98%** — `FF_USE_LFN=0` (rename `hg_sdgate.txt`→8.3 first) reclaims the LFN unicode tables.
 - RTC timestamps: PCF8563 driver (i2c1, mutex'd with the OLED), `log_stamp`; HIL-confirm 0x51 reg 0x02
   (currently uptime `+Ns`).
+
+---
+
+## RAM-headroom pass — **DONE, HIL-verified (2026-06-20)**
+
+The wired image was 98% of SRAM (265.7/270 KB) — fine at runtime (~24 KB free heap) but no room for M3.
+Measured the consumers and trimmed the cheap, low-risk ones (kept `copy_to_ram`; `ff.c` is NOT removed,
+only shrunk). NOTE: my earlier `FF_USE_LFN=0` claim was wrong — `ffunicode.c` is only 1.3 KB; the real
+weight was inside `ff.c` (exFAT/64-bit-LBA) + the unused SDIO sources.
+- **`src/sd/ffconf.h`** (`#include_next` overlay): `FF_FS_EXFAT=0` + `FF_LBA64=0` + `FF_USE_MKFS=0` +
+  `FF_USE_EXPAND=0` — we only ever mount existing FAT32 (≤32 GB) cards. **`ff.c` 46.4 → 29.4 KB (−17 KB)**.
+- **Dropped the unused SDIO sources** (SPI-only) via a CMake `FILTER /SDIO/` + 2 trivial stubs in
+  `src/sd/sdio_stubs.c` (`sd_card.c` hard-references them). **−~11 KB text**.
+- **FreeRTOS heap 44 → 34 KB** (`src/FreeRTOSConfig.h`). Runtime free heap 24 → 14 KB (still ample).
+- **Result: 265.7 → 235.5 KB = 87% (−30 KB; free SRAM ~4.5 → ~34 KB).** HIL on the trimmed build:
+  `{"q":"sd"}` FAT32 mount/write/readback OK (no exFAT), recorder logs cleanly (log_011, rx=32), heap
+  13.9 KB free, crash box (hardfault+mallocfail on the 34 KB heap) + watchdog + recorder host test
+  (31/31) all green, DAP binds. The `copy_to_ram`-drop (~170 KB, needs SWD re-verification) stays in
+  reserve for M3 if the UI needs it.

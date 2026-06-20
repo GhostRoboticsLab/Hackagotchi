@@ -49,6 +49,9 @@ add_subdirectory(${FATFS}/src ${CMAKE_BINARY_DIR}/no-OS-FatFS)
 # and parks a buffer in .uninitialized_data. We use OUR crash box; surgically remove just that source.
 get_target_property(_fatfs_srcs no-OS-FatFS-SD-SDIO-SPI-RPi-Pico INTERFACE_SOURCES)
 list(FILTER _fatfs_srcs EXCLUDE REGEX "/src/crash\\.c$")
+# We use the card over SPI only (SD_IF_SPI) — drop the ~11 KB of unused SDIO code (it sits in RAM under
+# copy_to_ram). sd_card.c references 2 SDIO symbols; src/sd/sdio_stubs.c satisfies the linker.
+list(FILTER _fatfs_srcs EXCLUDE REGEX "/SDIO/")
 set_target_properties(no-OS-FatFS-SD-SDIO-SPI-RPi-Pico PROPERTIES INTERFACE_SOURCES "${_fatfs_srcs}")
 
 add_executable(hackagotchi_probe
@@ -63,6 +66,7 @@ add_executable(hackagotchi_probe
         ${CMAKE_CURRENT_LIST_DIR}/src/crash_box.c            # M1: post-mortem crash box + HardFault handler
         ${CMAKE_CURRENT_LIST_DIR}/src/watchdog_task.c        # M1: SW watchdog (HW WDT + per-task check-in)
         ${CMAKE_CURRENT_LIST_DIR}/src/sd/hw_config.c         # M2: carlk3 SD pin map (SPI0 GP2/3/4/CS28)
+        ${CMAKE_CURRENT_LIST_DIR}/src/sd/sdio_stubs.c        # M2: stub the unused SDIO refs (SPI-only)
         ${CMAKE_CURRENT_LIST_DIR}/src/sd_gate.c              # M2: SD bring-up gate + recorder/SD task
         ${CMAKE_CURRENT_LIST_DIR}/src/recorder.c             # M2: black-box recorder core (host-tested)
         # --- pristine upstream debugprobe sources ---
@@ -84,6 +88,7 @@ target_sources(hackagotchi_probe PRIVATE
 # (and board_hackagotchi_config.h) shadow the upstream defaults.
 target_include_directories(hackagotchi_probe PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/src
+        ${CMAKE_CURRENT_LIST_DIR}/src/sd   # M2: our ffconf.h overlay shadows carlk3's (FatFs feature trim)
         ${CMAKE_CURRENT_LIST_DIR}/boards
         ${CMAKE_CURRENT_LIST_DIR}/src/ssd1306
         ${UPSTREAM}/include/
