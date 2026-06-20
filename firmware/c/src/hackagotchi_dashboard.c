@@ -1,27 +1,16 @@
 /*
- * Hackagotchi — Gate-1 OLED coexistence harness.
- * SPDX-License-Identifier: MIT
+ * Hackagotchi — M3 OLED dashboard task (multi-screen renderer). SPDX-License-Identifier: MIT
+ * See hackagotchi_dashboard.h for the architecture (lowest-prio render, snapshot-only reads, no button).
  *
- * The make-or-break Gate-1 test (docs/engineering-plan.md §6): the LOWEST-priority core-0 FreeRTOS
- * task drives a real SSD1306 over I2C1 (GP6/GP7) in a tight loop while the DAP/UART/USB tasks run,
- * to prove a continuous "dashboard" load NEVER stalls or corrupts the SWD flash path over thousands
- * of flash cycles. debugprobe-v2.2.3 is SINGLE-CORE FreeRTOS (configNUM_CORES=1; SMP — and the #189
- * flash regression — came later), so there is no core to pin to: the guarantee is purely priority —
- * this task sits below DAP and is fully preemptible by it.
- *
- * Each ssd1306_show() is a ~23 ms blocking i2c_write_blocking burst (1 KB framebuffer @ 400 kHz) —
- * that IS the "blocking burst off the hot path" under test; preemption must keep DAP unaffected.
- *
- * This is the coexistence harness, NOT the product dashboard. No real SD/buzzer/button yet.
- *
- * Build knobs (CMake -D…):
- *   ADVERSARIAL_STALL_MS  if >0, busy_wait_us(ms*1000) each loop — the "slow SD write" proxy
- *                         (engineering-plan §4.1): a long non-yielding low-prio core-0 stall that
- *                         the higher-prio DAP task must preempt without flash corruption.
- *   DASH_I2C_ADDR (0x3C), DASH_I2C_HZ (400000)
+ * Screen functions produce a TEXT MODEL (title + lines); the framework both (a) draws that model to the
+ * OLED and (b) publishes the identical text for CDC1 self-attestation — so the attestation is faithful by
+ * construction. A SHOW-SUCCESS counter (g_dash_shows) ticks only when ssd1306_show() actually ran (lock
+ * acquired), distinct from the loop counter, so a dark/skipped panel cannot pass as alive.
  */
 
 #include <stdio.h>
+#include <stdarg.h>
+#include <string.h>
 #include <pico/stdlib.h>
 #include <hardware/i2c.h>
 
@@ -29,89 +18,208 @@
 #include "task.h"
 
 #include "ssd1306.h"
-#include "i2c1_bus.h"   // [HACKAGOTCHI] M2: shared I2C1 + bus mutex (OLED shares GP6/7 with the RTC)
+#include "i2c1_bus.h"
+#include "sd_gate.h"      // rec_snapshot_t + dash_get_rec_snapshot()
 #include "hackagotchi_dashboard.h"
 
 #ifndef DASH_I2C_ADDR
 #define DASH_I2C_ADDR 0x3Cu
-#endif
-#ifndef DASH_I2C_HZ
-#define DASH_I2C_HZ 400000u
 #endif
 #ifndef ADVERSARIAL_STALL_MS
 #define ADVERSARIAL_STALL_MS 0
 #endif
 
 // XIAO + Seeed expansion: OLED on I2C1, SDA=GP6, SCL=GP7 (shares the bus with the RTC @0x51).
-#define DASH_I2C_INST i2c1
-#define DASH_I2C_SDA  6u
-#define DASH_I2C_SCL  7u
-#define DASH_REFRESH_MS 250u   // ~4 Hz
+#define DASH_I2C_INST   i2c1
+#define DASH_REFRESH_MS 250u    // ~4 Hz redraw (clock ticks visibly; proven-safe rate from Gate 1)
+#define DASH_CYCLE_MS  5000u    // auto-advance screens every 5 s (no button)
+#define DASH_MAX_LINES    5     // content rows below the header (y=12,22,32,42,52 in the 8x5 font)
+#define DASH_COLW        22     // 21 cols @ 6px pitch + NUL
 
 TaskHandle_t dashboard_taskhandle;
 
-// Self-attestation telemetry (see header). Written only here, read by cdc1_control.c's status reply.
-volatile uint32_t g_dash_counter = 0;
-volatile uint32_t g_dash_stall_us = 0;
+volatile uint32_t g_dash_counter   = 0;
+volatile uint32_t g_dash_stall_us  = 0;
+volatile uint32_t g_dash_shows     = 0;
+volatile int32_t  g_dash_screen    = 0;
+volatile uint32_t g_dash_stack_free = 0;
+
+// --- navigation intents (posted by CDC1/TUD, consumed by this task) ---
+static volatile int32_t s_nav_delta = 0;    // accumulated next/prev steps
+static volatile int32_t s_nav_abs   = -1;   // absolute screen target, -1 = none
+void dash_nav_step(int delta) { __atomic_fetch_add(&s_nav_delta, delta, __ATOMIC_RELAXED); }
+void dash_nav_to(int idx)     { __atomic_store_n(&s_nav_abs, idx, __ATOMIC_RELAXED); }
+
+// --- render context handed to each screen fn ---
+typedef struct {
+    rec_snapshot_t snap;   // recorder snapshot (last-good if a read ever fails)
+    bool     snap_ok;
+    unsigned heap;
+    uint32_t up_s;
+    int      idx;
+    int      count;
+} dash_ctx_t;
+
+// --- one screen's text model ---
+typedef struct {
+    char title[DASH_COLW];
+    char line[DASH_MAX_LINES][DASH_COLW];
+    int  nlines;
+} dash_screen_t;
+
+static void sline(dash_screen_t *s, const char *fmt, ...) {
+    if (s->nlines >= DASH_MAX_LINES) return;
+    va_list ap; va_start(ap, fmt);
+    vsnprintf(s->line[s->nlines], DASH_COLW, fmt, ap);
+    va_end(ap);
+    s->nlines++;
+}
+
+// Human byte count -> "123", "12.3K", "1.2M" (max 7 chars).
+static void fmt_bytes(char *out, size_t outsz, uint32_t b) {
+    if (b < 1000u)            snprintf(out, outsz, "%u", (unsigned)b);
+    else if (b < 1000000u)    snprintf(out, outsz, "%u.%uK", (unsigned)(b/1000u), (unsigned)((b/100u)%10u));
+    else                      snprintf(out, outsz, "%u.%uM", (unsigned)(b/1000000u), (unsigned)((b/100000u)%10u));
+}
+
+// ---------------- screens ----------------
+
+// Screen 0 — PROBE / home: identity, uptime, heap, clock. (DAP-activity is M3.3-optional.)
+static void screen_probe(const dash_ctx_t *c, dash_screen_t *s) {
+    snprintf(s->title, DASH_COLW, "HACKAGOTCHI");
+    sline(s, "probe   up %lus", (unsigned long)c->up_s);
+    sline(s, "heap    %u B", c->heap);
+    if (c->snap_ok && c->snap.rtc_valid)
+        sline(s, "clock   %02u:%02u:%02u", c->snap.rtc.hour, c->snap.rtc.min, c->snap.rtc.sec);
+    else
+        sline(s, "clock   --:--:--");
+    sline(s, "screen  %d/%d", c->idx + 1, c->count);
+}
+
+// Screen 1 — RECORDER / black-box status (read-only, entirely from the published snapshot).
+static void screen_recorder(const dash_ctx_t *c, dash_screen_t *s) {
+    const rec_snapshot_t *r = &c->snap;
+    snprintf(s->title, DASH_COLW, "RECORDER");
+    if (!c->snap_ok)          { sline(s, "snapshot busy"); return; }
+    if (!r->sd_mounted)       { sline(s, "SD not mounted"); return; }
+    sline(s, "%s %s", r->logging ? "REC" : "off", r->file);
+    char rx[12]; fmt_bytes(rx, sizeof rx, r->rx_total);
+    sline(s, "rx %s  drop %u", rx, (unsigned)r->rec_drop);
+    sline(s, "peak %u B/s", (unsigned)r->tp_peak);
+    sline(s, "wedge:%s hits:%u", r->wedge ? "YES" : "no", (unsigned)r->hits);
+    if (r->alert[0]) sline(s, "! %s", r->alert);
+    else if (r->rtc_valid) sline(s, "clk %02u:%02u:%02u", r->rtc.hour, r->rtc.min, r->rtc.sec);
+    else sline(s, "err:%d", r->last_err);
+}
+
+static void (*const SCREENS[])(const dash_ctx_t *, dash_screen_t *) = {
+    screen_probe,
+    screen_recorder,
+};
+#define N_SCREENS ((int)(sizeof(SCREENS) / sizeof(SCREENS[0])))
+int dash_screen_count(void) { return N_SCREENS; }
+
+// --- published attestation (seqlock; the EXACT text drawn this frame) ---
+static volatile uint32_t s_attest_seq = 0;
+static char s_attest_text[DASH_COLW * (DASH_MAX_LINES + 1)];
+static int  s_attest_idx = 0;
+
+static void publish_attest(const dash_screen_t *s, int idx) {
+    static char buf[sizeof s_attest_text];
+    int o = snprintf(buf, sizeof buf, "%s", s->title);
+    for (int i = 0; i < s->nlines && o < (int)sizeof buf - 1; i++)
+        o += snprintf(buf + o, sizeof buf - (size_t)o, "\n%s", s->line[i]);
+    s_attest_seq++;
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    memcpy(s_attest_text, buf, sizeof s_attest_text);
+    s_attest_idx = idx;
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    s_attest_seq++;
+}
+
+int dash_get_attest(char *out, size_t outsz) {
+    int idx = 0;
+    for (int t = 0; t < 16; t++) {
+        uint32_t s1 = s_attest_seq;
+        if (s1 & 1u) continue;
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        snprintf(out, outsz, "%s", s_attest_text);
+        idx = s_attest_idx;
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        if (s1 == s_attest_seq) break;
+    }
+    return idx;
+}
+
+// --- pick the active screen index: absolute > relative > auto-cycle; clamp/wrap on the reader side ---
+static int next_index(int idx, uint32_t now, uint32_t *last_cycle) {
+    int32_t a = __atomic_exchange_n(&s_nav_abs, -1, __ATOMIC_RELAXED);
+    int32_t d = __atomic_exchange_n(&s_nav_delta, 0, __ATOMIC_RELAXED);
+    bool manual = false;
+    if (a >= 0)      { idx = a; manual = true; }
+    else if (d != 0) { idx += (int)d; manual = true; }
+    else if ((uint32_t)(now - *last_cycle) >= DASH_CYCLE_MS) { idx++; *last_cycle = now; }
+    if (manual) *last_cycle = now;            // any manual nav resets the auto-cycle clock
+    idx = ((idx % N_SCREENS) + N_SCREENS) % N_SCREENS;  // wrap/clamp (N_SCREENS > 0)
+    return idx;
+}
 
 void dashboard_task(void *ptr) {
     (void)ptr;
+    i2c1_bus_init();   // idempotent; main() already did it before the scheduler
 
-    // Bring up the shared I2C1 bus (GP6/GP7, independent of SWD GP26/27 and the SD bus). Idempotent —
-    // main() already did this before the scheduler started; this is belt-and-braces. The RTC (0x51)
-    // shares this bus from the SD task, so every OLED transaction below holds i2c1_bus_lock().
-    i2c1_bus_init();
-
-    // The SSD1306 framebuffer is malloc()'d from the C-lib heap, NOT the FreeRTOS heap — so the
-    // xPortGet*HeapSize() numbers below cleanly reflect task/RTOS allocations (the heap_4/heap_1
-    // decision metric).
-    ssd1306_t disp;
-    // MUST set before init: external_vcc is the only field ssd1306_init() READS but does not set.
-    // The expansion OLED runs off the internal charge pump, so false => init sends 0x8D,0x14 (pump
-    // ON). A garbage stack value here sends 0x8D,0x10 (pump OFF) => no boost voltage => DARK panel.
-    disp.external_vcc = false;
+    static ssd1306_t disp;
+    disp.external_vcc = false;   // MUST set before init: charge-pump ON, else the panel stays dark
     bool ok = false;
     if (i2c1_bus_lock(200)) { ok = ssd1306_init(&disp, 128, 64, DASH_I2C_ADDR, DASH_I2C_INST); i2c1_bus_unlock(); }
 
-    uint32_t counter = 0;
-    char l0[22], l1[22], l2[22], l3[22];
+    static dash_ctx_t ctx;          // static: keep the ~150 B snapshot copy off the 4 KB task stack
+    static dash_screen_t scr;
+    static rec_snapshot_t last_good; // reused when a snapshot read momentarily fails
+    int idx = 0;
+    uint32_t last_cycle = xTaskGetTickCount();
     TickType_t wake = xTaskGetTickCount();
 
     for (;;) {
-        counter++;
-        g_dash_counter = counter;   // [HACKAGOTCHI] self-attest: proves THIS task kept looping
-        unsigned freeh = (unsigned)xPortGetFreeHeapSize();
-        unsigned minh  = (unsigned)xPortGetMinimumEverFreeHeapSize();
+        uint32_t now = (uint32_t)(time_us_64() / 1000ull);
+        g_dash_counter++;
 
 #if ADVERSARIAL_STALL_MS > 0
-        // Slow-SD-write proxy: a long non-yielding stall in the lowest-prio task. The DAP task must
-        // preempt this and finish flashes uncorrupted — that preemption is exactly what we validate.
-        // Measure the ACTUAL elapsed time so the status reply proves the busy_wait truly fired (not
-        // optimised away), closing the Gate-1 stressor-actually-ran provenance gap at runtime.
-        uint64_t _stall_t0 = time_us_64();
+        uint64_t _t0 = time_us_64();
         busy_wait_us((uint32_t)ADVERSARIAL_STALL_MS * 1000u);
-        g_dash_stall_us = (uint32_t)(time_us_64() - _stall_t0);
+        g_dash_stall_us = (uint32_t)(time_us_64() - _t0);
 #endif
 
+        // gather context (snapshot-only reads — never touch g_rec/RTC directly)
+        if (dash_get_rec_snapshot(&ctx.snap)) { last_good = ctx.snap; ctx.snap_ok = true; }
+        else { ctx.snap = last_good; ctx.snap_ok = false; }
+        ctx.heap  = (unsigned)xPortGetFreeHeapSize();
+        ctx.up_s  = (uint32_t)(time_us_64() / 1000000ull);
+        ctx.count = N_SCREENS;
+
+        idx = next_index(idx, now, &last_cycle);
+        ctx.idx = idx;
+        g_dash_screen = idx;
+
+        // build the text model
+        memset(&scr, 0, sizeof scr);
+        SCREENS[idx](&ctx, &scr);
+
+        // render the SAME text model to the OLED
         if (ok) {
-            snprintf(l0, sizeof l0, "HACKAGOTCHI G1");
-            snprintf(l1, sizeof l1, "OLED+DAP n=%lu", (unsigned long)counter);
-            snprintf(l2, sizeof l2, "heap free %u", freeh);
-            snprintf(l3, sizeof l3, "heap min  %u", minh);
-            ssd1306_clear(&disp);                     // framebuffer-only ops — no bus lock needed
-            ssd1306_draw_string(&disp, 0, 0, 1, l0);
-            ssd1306_draw_string(&disp, 0, 16, 1, l1);
-            ssd1306_draw_string(&disp, 0, 32, 1, l2);
-            ssd1306_draw_string(&disp, 0, 48, 1, l3);
-            // ~23 ms blocking I2C burst — the hot-path-coexistence stress. Hold the bus mutex so an RTC
-            // read from the SD task can't interleave on GP6/7. Skip the frame if the bus is busy.
-            if (i2c1_bus_lock(200)) { ssd1306_show(&disp); i2c1_bus_unlock(); }
+            ssd1306_clear(&disp);                                   // framebuffer-only — no bus lock
+            ssd1306_draw_string(&disp, 0, 0, 1, scr.title);
+            ssd1306_draw_line(&disp, 0, 9, 127, 9);
+            for (int i = 0; i < scr.nlines; i++)
+                ssd1306_draw_string(&disp, 0, 12 + i * 10, 1, scr.line[i]);
+            // the ONE i2c1 hold: the ~23 ms blocking show. Count it ONLY on success (frame truly flushed).
+            if (i2c1_bus_lock(200)) { ssd1306_show(&disp); i2c1_bus_unlock(); g_dash_shows++; }
         }
 
-        // [HACKAGOTCHI] M2: the Gate-1 heap series was printf'd to GP0 TX (uart0 stdio). GP0 is now the
-        // live bridge TX, so the probe must NOT emit on it — heap telemetry is on CDC1 ({"q":"status"}
-        // -> "heap"), the OLED watermark is the live evidence. (Was: printf("HEAP n=..."), removed.)
+        // publish the identical text for camera-free self-attestation
+        publish_attest(&scr, idx);
 
+        g_dash_stack_free = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
         xTaskDelayUntil(&wake, pdMS_TO_TICKS(DASH_REFRESH_MS));
     }
 }

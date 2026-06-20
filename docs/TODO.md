@@ -103,8 +103,12 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     `rec_snapshot_t` (single-writer seqlock, SD task) + `dash_get_rec_snapshot()` + `recorder_copy_tail()`
     + cached RTC; **fixed the pre-existing `{"q":"rec"}` cross-task race** (live `g_rec.filename` pointer +
     off-task `hw->sd_mounted()`). Gates: DAP binds, `{"q":"rec"}`×80 0 torn, **coexist soak 0/400 + rec_drop=0**.
-  - [ ] **M3.1** screen framework (screen table + clamped index, auto-cycle + CDC1 next/prev/screen,
-    self-attestation w/ show-success counter) + first real screen (Recorder/SD status) + R1 re-soak.
+  - [x] **M3.1 screen framework + first screen** — **PASS, HIL-verified** *(2026-06-21)*: multi-screen
+    renderer (screen table + reader-clamped index, auto-cycle 5s + CDC1 `next`/`prev`/`{"q":"screen","n"}`).
+    Screen fns emit a TEXT MODEL drawn to the OLED AND published for **self-attestation** (`{"q":"screen"}`
+    returns the exact rendered text + a **show-success counter distinct from the loop counter** so a dark
+    panel can't pass). Screens: PROBE/home + RECORDER (snapshot-fed). `screen_hil.py` PASS (nav, auto-cycle,
+    OOB clamp no-hardfault, shows==loops climbing); operator confirmed both screens cycling; R1 re-soak 0/0.
   - [ ] **M3.2** core screen set (Mascot/bridge home · Sniffer/live-UART · Watchdog/flight-recorder ·
     Throughput · Clock) — all fed by published snapshots; no direct g_rec/freeze/RTC access from DASH.
   - [ ] **M3.3** buzzer/LED event feedback (wedge/SD-fault/trigger) + OPTIONAL gated probe-active + closeout.

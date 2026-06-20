@@ -82,3 +82,47 @@ closed, and R1 is intact (0/400 under load, rec_drop=0). Foundation laid for M3.
 
 Build: `BUILD_DIR=/tmp/hg-build-m3np ./build_fork.sh` (text 179792). Device resting on `/tmp/hg-build-m3np`
 (M3.0 image: snapshot boundary + buzzer + NeoPixel). R1 re-confirmed on this exact build (see soak above).
+
+---
+
+## Increment M3.1 — screen framework + first screen — **PASS (live, 2026-06-21)**
+
+**Falsifiable claim.** The Gate-1 single-frame harness becomes a multi-screen renderer: a screen table
+with a reader-clamped index, auto-cycle + CDC1 nav (no button), and **camera-free self-attestation** that
+proves the right content renders AND that frames actually flush to the panel — with no DAP regression.
+
+**Design (the verify-the-verifier part).** Each screen fn produces a TEXT MODEL (`dash_screen_t`: title +
+≤5 lines); the framework BOTH draws that model to the OLED AND publishes the identical text (seqlock) for
+CDC1 `{"q":"screen"}` — so the attestation is faithful *by construction* (it can't drift from what was
+drawn). A **show-success counter** `g_dash_shows` ticks ONLY inside the `if (i2c1_bus_lock) { ssd1306_show }`
+success branch — DISTINCT from the loop counter `g_dash_counter` — so a dark/skipped panel shows
+`shows < loops` and cannot pass as alive (the Gate-1 loop-counter alone couldn't prove a flush). The
+dashboard is the SOLE owner of the screen index; CDC1 only posts atomic intents (`dash_nav_step` /
+`dash_nav_to`) that the dashboard consumes and wraps `((idx%n)+n)%n` on the READER side (the old unbounded
+`s_page++` could have indexed OOB → hardfault). `disp.external_vcc=false` preserved (charge-pump on).
+
+**Screens (M3.1).** (0) PROBE/home — identity, uptime, heap, RTC clock, screen N/M. (1) RECORDER —
+logging/file/rx/drop/peak/wedge/hits/clock, entirely from the published snapshot (no `g_rec` access). The
+remaining core screens (Mascot · Sniffer/live-UART · Throughput · Clock) are M3.2; all data plumbing is
+ready. Trivial primitives ported inline: `fmt_bytes`, header (title + y=9 divider), `sline` text model.
+
+**Input.** Auto-cycle every 5 s + CDC1 `{"q":"next"}` / `{"q":"prev"}` / `{"q":"screen","n":N}`; a manual
+nav resets the auto-cycle clock. `{"q":"screen"}` (no n) returns the attestation.
+
+**HIL (`tests/m3/screen_hil.py`, all OK):**
+- boots on screen 0 (text contains `HACKAGOTCHI`); `next` → screen 1 (`RECORDER`); `prev` → screen 0.
+- screen 1's text carries the LIVE snapshot filename (matched against `{"q":"rec"}`) — content is real.
+- `{"q":"screen","n":99}` → CLAMPED to a valid index, `crashes==0` (no OOB hardfault).
+- **auto-cycle** advanced 0→1 after ~5 s with zero input.
+- **`shows`==`loops`** and climbing (every frame flushed — the panel is genuinely being driven; not a
+  skipped/dark path), `dstack` ≈ 884 words free (stack healthy). RTC clock ticks live in the text.
+- **Operator glance:** OLED auto-cycling between the PROBE and RECORDER screens (panel confirmed lit —
+  anchors that the show-success counter corresponds to real photons; panel known-good since Gate 1).
+- **R1 re-soak on this build** (`coexist_soak.py 120`): DAP 0 fails / 0 stalls, recorder err=0/wedge=0/
+  rec_drop=0 — the multi-screen renderer (more per-frame draw at the SAME prio as the SD task) did NOT
+  starve the recorder drain.
+
+**Verdict: PASS.** The screen framework + self-attestation harness are in place and honest; nav + auto-
+cycle + clamp safety proven; R1 intact. M3.2 just adds screen fns to the table.
+
+Build: `BUILD_DIR=/tmp/hg-build-m31 ./build_fork.sh`. Device resting on `/tmp/hg-build-m31`.

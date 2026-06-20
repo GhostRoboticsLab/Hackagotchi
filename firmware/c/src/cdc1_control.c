@@ -53,9 +53,8 @@
 #define LINE_MAX 128       // bounded request line buffer — overflow resets it, never overruns
 #define MAX_TOK  16        // enough tokens for our small {"q":"..."} requests
 
-// Page-navigation intent: next/prev move it. The single-screen Gate-1 harness ignores it today; the
-// M3 dashboard will consume it to pick a screen. Echoed in every reply so a host can drive nav now.
-static int s_page = 0;
+// Screen navigation: the M3 dashboard OWNS the screen index; CDC1 only posts intents (dash_nav_step /
+// dash_nav_to) that the dashboard consumes + clamps. The current index is read back from g_dash_screen.
 
 // Count of rx-callbacks that ended holding a partial line (= a request spanned >1 USB packet and the
 // line buffer reassembled it). Exposed as `frag` so the HIL fragmentation test can prove the
@@ -84,7 +83,7 @@ static void write_status(uint8_t itf) {
                      (unsigned) g_dash_counter, (int) ADVERSARIAL_STALL_MS,
                      (unsigned) g_dash_stall_us, (int) HACKA_DASH_PRIO,
                      (unsigned) crash_box_count(), (int) wd_is_armed(), (unsigned) wd_max_gap_ms(),
-                     (unsigned) g_tud_checkin, s_page,
+                     (unsigned) g_tud_checkin, (int) g_dash_screen,
                      (unsigned) uart_bridge_drops(), (unsigned) uart_bridge_highwater(),
                      (unsigned) cdc_uart_tx_overflow(), (unsigned) s_partial);
   if (len > 0) reply(itf, r);
@@ -97,8 +96,31 @@ static void write_lastfault(uint8_t itf) {
 }
 
 static void write_page(uint8_t itf) {
-  char r[32];
-  int len = snprintf(r, sizeof r, "{\"page\":%d}\n", s_page);
+  char r[40];
+  int len = snprintf(r, sizeof r, "{\"page\":%d,\"n\":%d}\n", (int)g_dash_screen, dash_screen_count());
+  if (len > 0) reply(itf, r);
+}
+
+// M3.1 self-attestation: the current screen index + the EXACT text the dashboard drew this frame, plus
+// the show-success / loop counters. A host test asserts content + that frames actually flush (shows
+// climbing), with no camera. Newlines in the rendered text become '|'; '"'/'\' are escaped.
+static void write_screen(uint8_t itf) {
+  static char txt[160];
+  int idx = dash_get_attest(txt, sizeof txt);
+  static char esc[200];
+  size_t o = 0;
+  for (size_t i = 0; txt[i] && o + 2 < sizeof esc; i++) {
+    char c = txt[i];
+    if (c == '\n') esc[o++] = '|';
+    else if (c == '"' || c == '\\') { esc[o++] = '\\'; esc[o++] = c; }
+    else if (c >= 32 && c <= 126) esc[o++] = c;
+  }
+  esc[o] = '\0';
+  static char r[280];
+  int len = snprintf(r, sizeof r,
+                     "{\"screen\":%d,\"n\":%d,\"shows\":%u,\"loops\":%u,\"dstack\":%u,\"text\":\"%s\"}\n",
+                     idx, dash_screen_count(), (unsigned)g_dash_shows, (unsigned)g_dash_counter,
+                     (unsigned)g_dash_stack_free, esc);
   if (len > 0) reply(itf, r);
 }
 
@@ -177,8 +199,11 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   // {"q":"tail"}: request a tail read (SD task does the FatFs read off the hot path) AND return the
   // PREVIOUS read — so send it twice (request, then collect) to verify on-card log content.
   if (!strcmp(q, "tail"))      { static char r[256]; sd_rec_tail_json(r, sizeof r); sd_rec_tail_request(); reply(itf, r); return; }
-  if (!strcmp(q, "next"))      { s_page++; write_page(itf); return; }
-  if (!strcmp(q, "prev"))      { if (s_page > 0) s_page--; write_page(itf); return; }
+  if (!strcmp(q, "next"))      { dash_nav_step(+1); write_page(itf); return; }
+  if (!strcmp(q, "prev"))      { dash_nav_step(-1); write_page(itf); return; }
+  // {"q":"screen"} -> report the current screen + rendered-text attestation (HIL: content + frames-flush).
+  // {"q":"screen","n":N} -> jump to screen N (clamped by the dashboard), then report.
+  if (!strcmp(q, "screen"))    { int v; if (get_int(line, tok, n, "n", &v)) dash_nav_to(v); write_screen(itf); return; }
   // UART-bridge HIL self-test: PL011 internal loopback (TX->RX in-chip) — round-trip CDC0 with no jumper.
   if (!strcmp(q, "uloop_on"))  { uart_bridge_set_loopback(PROBE_UART_INTERFACE, true);  reply(itf, "{\"uloop\":1}\n"); return; }
   if (!strcmp(q, "uloop_off")) { uart_bridge_set_loopback(PROBE_UART_INTERFACE, false); reply(itf, "{\"uloop\":0}\n"); return; }
