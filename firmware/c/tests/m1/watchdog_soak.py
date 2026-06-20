@@ -2,19 +2,19 @@
 """
 M1 watchdog arm-by-default SAFETY soak.  SPDX-License-Identifier: MIT
 
-Claim under test (corroboration, not proof — see note):
-  With the SW watchdog ARMED BY DEFAULT, sustained heavy load on the MONITORED task (TUD) does NOT
-  spuriously reboot the probe: `up` only increases, `crashes` never increments.
+Claim under test (a CORROBORATION, deliberately NOT a margin proof):
+  With the SW watchdog ARMED BY DEFAULT, the probe runs under sustained concurrent load (DAP flashing +
+  CDC firehose) without spuriously rebooting: `up` only increases, `crashes` never increments, and the
+  per-run `wd_gap` (reset at start) stays 0 — TUD never missed a check-in window.
 
-The watchdog monitors TUD, so the load must hit TUD, not just DAP. This soak therefore drives BOTH
-concurrently: a background thread flashing the target over DAP (USB vendor transfers -> TUD) AND a
-foreground CDC0 loopback "firehose" (USB CDC IN+OUT -> TUD + the bridge task). If TUD ever stalled past
-the 4 s window under this, the armed watchdog would fire -> `up` resets / `crashes` jumps -> FAIL.
-
-NOTE ON STRENGTH: a soak cannot positively prove the ABSENCE of a false-fire margin. The real safety
-guarantee is the PRIORITY argument (TUD prio +2 > DAP +1, TUD always has work and is never starved);
-this soak CORROBORATES it under real sustained load. To avoid a silent no-op pass, it requires that
-real flashing actually happened (flash_ok >= MIN) and real CDC traffic flowed.
+HONEST SCOPE (learned the hard way across audit rounds): this soak CANNOT prove a stall margin, and no
+longer pretends to. The real safety guarantee is the PRIORITY argument — TUD (prio +2) sits above DAP
+(+1) and is high-priority/always-runnable, so NO normal load drives it near the 4 s stall threshold
+(that is precisely why arm-by-default is safe). Corollary: any "the load stressed TUD" signal a soak
+can read is tautological (the TUD heartbeat free-runs at ~20 kHz even idle), so `tud`/`fh_bytes` are
+reported as ACTIVITY only, never as a pass/fail gate. The honest gates are: it actually did work
+(flash_ok >= MIN), it did not reboot (up monotonic), nothing faulted/fired (crashes steady), and TUD
+missed no window this run (wd_gap < ceiling since reset).
 
 Run (from firmware/c):  .venv/bin/python tests/m1/watchdog_soak.py [seconds]
 """
@@ -172,34 +172,33 @@ def main():
         c.flush()
         print(f"[final] {final}")
 
-    GAP_CEIL = 1500       # >=3 missed 500ms windows post-reset = TUD nearing the 4000ms stall threshold
-    TUD_MIN_ADVANCE = 10000  # the heartbeat must have advanced a LOT -> load genuinely reached TUD
+    GAP_CEIL = 1500       # >=3 missed 500ms windows post-reset = TUD would be nearing the 4000ms stall
     tud_delta = (tud1 - tud0) if (tud1 is not None and tud0 is not None) else 0
-    # verdict
+    # verdict — what this soak HONESTLY gates on (device-sourced, can fail):
     if fired:
         return 1
-    if flash["ok"] < MIN_FLASHES:
-        print(f"FAIL: only {flash['ok']} flashes succeeded (< {MIN_FLASHES}) — DAP load was a no-op, soak invalid")
-        return 1
-    # POSITIVE proof the load actually reached the MONITORED task (not just 'didn't reboot while idle').
-    if tud_delta < TUD_MIN_ADVANCE:
-        print(f"FAIL: TUD heartbeat only advanced {tud_delta} (< {TUD_MIN_ADVANCE}) — load did not reach "
-              f"the monitored task, soak inconclusive")
+    if flash["ok"] < MIN_FLASHES:  # the DAP rig actually exercised the probe (not a no-op run)
+        print(f"FAIL: only {flash['ok']} flashes succeeded (< {MIN_FLASHES}) — soak did no real work")
         return 1
     if cr1 != cr0:
-        print(f"FAIL: crashes changed {cr0}->{cr1}")
+        print(f"FAIL: crashes changed {cr0}->{cr1} — the watchdog (or a fault) FIRED")
         return 1
     if up1 is None or up0 is None or up1 < up0:
         print(f"FAIL: up not monotonic ({up0}->{up1}) — probe rebooted")
         return 1
-    # wd_gap was RESET at soak start, so this is the worst missed-window count DURING this run (not the
-    # boot floor). Healthy = 0; climbing = TUD nearing the stall threshold.
+    # wd_gap was RESET at start, so this is the worst missed-window count DURING this run. Healthy = 0.
     if gap1 is None or gap1 >= GAP_CEIL:
         print(f"FAIL: wd_gap={gap1}ms (since reset) reached/exceeded {GAP_CEIL}ms — TUD stalled under load")
         return 1
-    print(f"\nPASS: under real load (TUD heartbeat +{tud_delta}, {flash['ok']} flashes [{flash['fail']} "
-          f"failed], {fh_bytes//1024}KB firehose) the armed watchdog did NOT false-fire: "
-          f"up {up0}->{up1} monotonic, crashes steady at {cr1}, wd_gap {gap1}ms (since reset) << 4000ms")
+    # NB: tud_delta + fh_bytes are reported as ACTIVITY, not as proof the load stressed TUD. The TUD
+    # heartbeat free-runs at ~20 kHz even idle, so it cannot prove load-correlation; and being
+    # high-priority, TUD is never driven near the stall threshold by normal load (that is *why*
+    # arm-by-default is safe). This soak CORROBORATES the priority-argument safety guarantee under
+    # sustained concurrent load — it does not, and cannot, prove a stall margin.
+    print(f"\nPASS: armed watchdog ran 80s under concurrent load without false-firing "
+          f"(up {up0}->{up1} monotonic, crashes steady at {cr1}, wd_gap {gap1}ms since reset). "
+          f"Activity: {flash['ok']} flashes [{flash['fail']} failed], {fh_bytes//1024}KB firehose, "
+          f"TUD heartbeat +{tud_delta}. Corroborates the priority guarantee (TUD>DAP); not a margin proof.")
     return 0
 
 

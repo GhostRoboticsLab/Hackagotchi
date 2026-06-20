@@ -317,6 +317,14 @@ Mirror the existing self-hosted-runner pattern (the MicroPython UF2 flow in Pico
 - **Release:** on tag → GitHub Release with `.uf2` **and `.elf`** attached (the `.elf` is required to symbolicate fault dumps + RTT). Dispatch-only manual trigger, like the existing firmware workflow.
 - **(Later) HIL smoke** on the self-hosted mac-mini: real probe flashes a target, asserts IDCODE — added only after Gates 0–2 pass.
 
+**Delivery status (reconciled with reality as of M1, 2026-06-20):** `build` ✅ and a static-analysis gate
+(`analyze.sh`: `-Wall -Wextra -Wshadow -Wundef -Wdouble-promotion -fanalyzer -fsyntax-only` + optional
+cppcheck) ✅ are in `.github/workflows/firmware-c.yml`. **Deferred to M2** (CI plumbing, not a missing M1
+deliverable): the **`host-tests`** Ceedling job (M1 ships the host test `firmware/c/tests/m1/ring_test.c`
+run via `cc` — Ceedling wrapping lands when M2 adds log-rotation/wedge-detector logic), a dedicated
+**`clang-tidy`** job, and the full **`werror-build`** (`-Werror -Wconversion`) gate. Tracked in
+`docs/TODO.md`; M1's own code builds `-Wall -Wextra`-clean.
+
 ---
 
 ## 8. Risk register
