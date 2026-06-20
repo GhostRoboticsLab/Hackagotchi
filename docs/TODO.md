@@ -46,8 +46,11 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
   PR; propose an umbrella LICENSE; pursue the co-maintainer path.
 
 ## Housekeeping
-- [ ] Add a **LICENSE** (org choice) before any public/commercial release.
+- [ ] Add a **LICENSE** (org choice) before any public/commercial release. *(third-party deps documented
+  in `firmware/c/THIRD-PARTY-NOTICES.md` — all permissive MIT/BSD-3/Apache; project's own license still TBD.)*
 - [ ] Vendor `sdcard.py` into `firmware/micropython/lib/` (currently a noted gap).
 - [ ] Add the **org remote** when the URL is provided, then `git push -u origin main`.
-- [ ] CI/CD: GitHub Actions firmware build (pinned Arm GCC — note host has GCC 16.1, very new) +
-  host-test/analyzer jobs (`engineering-plan.md` §7).
+- [x] CI/CD: `.github/workflows/firmware-c.yml` — manual-dispatch build (setup.sh + build_fork.sh,
+  pinned Arm GCC 13.3 via the self-hosted runner's fw-build cache) + the `analyze.sh` static-analysis
+  gate + .uf2/.elf artifacts + optional Release (`engineering-plan.md` §7). *Untested until the org
+  remote + a workflow run exist.* TODO: host-test (Ceedling) job after M1 introduces portable logic.

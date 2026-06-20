@@ -1,0 +1,87 @@
+name: Firmware (C probe fork)
+
+# Manual-only, mirroring PicoInky's firmware.yml: runs on the SHARED self-hosted org runner, so it
+# must never fire on push/PR/tag — only when a human clicks "Run workflow"
+# (or `gh workflow run firmware-c.yml -f version=X.Y.Z`). Politeness contract for a shared runner.
+#
+# Builds the Hackagotchi probe fork (debugprobe-v2.2.3 overlay) and runs the static-analysis gate.
+# Reuses the same fw-build cache the runner already has (pinned Arm GCC 13.3.Rel1 + pico-sdk 2.2.0),
+# so it matches the proven local build_fork.sh recipe.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Firmware version (e.g. 0.1.0). Tag will be fw-c-v<version> if publishing."
+        type: string
+        required: true
+      publish_release:
+        description: "Publish a GitHub Release with the .uf2 + .elf (otherwise just artifacts)."
+        type: boolean
+        default: false
+
+concurrency:
+  group: firmware-c-build
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # for the optional Release
+
+jobs:
+  build:
+    name: Build + static-analysis gate
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 45
+    env:
+      # The runner's persistent toolchain/SDK cache (same volume PicoInky uses). build_fork.sh's
+      # GCC_DIR / PICO_SDK_PATH defaults already point here; override via Actions vars if the path moves.
+      FWBUILD: ${{ vars.FW_BUILD_DIR || '/Volumes/MacSSD1/DeveloperWorkspace/fw-build' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch upstream (debugprobe-v2.2.3)
+        working-directory: firmware/c
+        run: |
+          set -euo pipefail
+          export PICO_SDK_PATH="${FWBUILD}/micropython/lib/pico-sdk"
+          ./setup.sh
+
+      - name: Build fork (pinned Arm GCC 13.3 + pico-sdk 2.2.0)
+        id: build
+        working-directory: firmware/c
+        run: |
+          set -euo pipefail
+          ./build_fork.sh
+          echo "uf2=$(pwd)/build/hackagotchi_probe.uf2" >> "$GITHUB_OUTPUT"
+          echo "elf=$(pwd)/build/hackagotchi_probe.elf" >> "$GITHUB_OUTPUT"
+          # Provenance: the descriptor + pin map are embedded; surface them in the log.
+          picotool info -a build/hackagotchi_probe.uf2 || true
+
+      - name: Static-analysis gate (GCC -fanalyzer + cppcheck)
+        working-directory: firmware/c
+        run: ./analyze.sh
+
+      - name: Upload artifacts (.uf2 + .elf — .elf needed to symbolicate fault dumps)
+        uses: actions/upload-artifact@v4
+        with:
+          name: hackagotchi-probe-c-${{ inputs.version }}
+          path: |
+            firmware/c/build/hackagotchi_probe.uf2
+            firmware/c/build/hackagotchi_probe.elf
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: ${{ inputs.publish_release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="fw-c-v${{ inputs.version }}"
+          gh release create "$tag" \
+            --title "Hackagotchi probe firmware (C) v${{ inputs.version }}" \
+            --notes "debugprobe-v2.2.3 fork. DAP + UART bridge + JSON-control CDC. Static-analysis gate green." \
+            firmware/c/build/hackagotchi_probe.uf2 \
+            firmware/c/build/hackagotchi_probe.elf
+
+  # TODO (after M1 introduces portable logic): a host-tests job (Ceedling/Unity) for the UART ring
+  # buffer, wedge-detector state machine, JSON control parser, and log-rotation — runs with no probe.
