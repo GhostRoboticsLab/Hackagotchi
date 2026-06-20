@@ -106,12 +106,9 @@ void dashboard_task(void *ptr) {
             ssd1306_show(&disp);  // ~23 ms blocking I2C burst — the hot-path-coexistence stress
         }
 
-        // Best-effort machine-readable heap series for heap_plot.py, emitted on GP0 TX (uart0
-        // stdio; the bridge UART is idle during the gate). Capture with any UART tap; the live
-        // watermark on the OLED is the primary, always-available evidence.
-        if ((counter & 0x3u) == 0u)
-            printf("HEAP n=%lu free=%u min=%u stall=%d\n",
-                   (unsigned long)counter, freeh, minh, (int)ADVERSARIAL_STALL_MS);
+        // [HACKAGOTCHI] M2: the Gate-1 heap series was printf'd to GP0 TX (uart0 stdio). GP0 is now the
+        // live bridge TX, so the probe must NOT emit on it — heap telemetry is on CDC1 ({"q":"status"}
+        // -> "heap"), the OLED watermark is the live evidence. (Was: printf("HEAP n=..."), removed.)
 
         xTaskDelayUntil(&wake, pdMS_TO_TICKS(DASH_REFRESH_MS));
     }

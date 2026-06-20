@@ -143,6 +143,10 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   if (!strcmp(q, "wd_arm"))    { wd_arm(); reply(itf, "{\"wd\":\"armed\"}\n"); return; }
   if (!strcmp(q, "wd_reset"))  { wd_gap_reset(); reply(itf, "{\"wd_gap\":0}\n"); return; }
   if (!strcmp(q, "sd"))        { static char r[160]; sd_gate_status_json(r, sizeof r); reply(itf, r); return; }
+  if (!strcmp(q, "rec"))       { static char r[256]; sd_rec_status_json(r, sizeof r); reply(itf, r); return; }
+  // {"q":"tail"}: request a tail read (SD task does the FatFs read off the hot path) AND return the
+  // PREVIOUS read — so send it twice (request, then collect) to verify on-card log content.
+  if (!strcmp(q, "tail"))      { static char r[256]; sd_rec_tail_json(r, sizeof r); sd_rec_tail_request(); reply(itf, r); return; }
   if (!strcmp(q, "next"))      { s_page++; write_page(itf); return; }
   if (!strcmp(q, "prev"))      { if (s_page > 0) s_page--; write_page(itf); return; }
   // UART-bridge HIL self-test: PL011 internal loopback (TX->RX in-chip) — round-trip CDC0 with no jumper.

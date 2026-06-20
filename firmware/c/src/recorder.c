@@ -133,18 +133,14 @@ bool recorder_start(recorder_t *r, uint32_t now_ms) {
 
 void recorder_stop(recorder_t *r) { r->logging = false; }
 
-void recorder_note_rx(recorder_t *r, uint32_t now_ms, size_t n) {
-    r->last_rx_ms = now_ms;
-    r->ever_active = true;
+void recorder_feed(recorder_t *r, const uint8_t *data, size_t n, uint32_t now_ms) {
     r->rx_total += (uint32_t)n;
     r->tp_accum += (uint32_t)n;
-    if (r->wedge_active) {           // silent -> active edge
+    if (r->wedge_active) {             // drained resumed bytes -> RECOVERED edge (silent -> active)
         r->wedge_active = false;
         if (r->hw->alert) r->hw->alert("RECOVERED", 1600, 2400);
     }
-}
 
-void recorder_feed(recorder_t *r, const uint8_t *data, size_t n, uint32_t now_ms) {
     emit(r, data, n, now_ms, false);   // log buffering (flush at threshold); no-op if not logging
 
     for (size_t i = 0; i < n; i++) {   // freeze ring + trigger scan run regardless of logging
@@ -166,9 +162,10 @@ void recorder_feed(recorder_t *r, const uint8_t *data, size_t n, uint32_t now_ms
     }
 }
 
-void recorder_tick(recorder_t *r, uint32_t now_ms) {
+void recorder_tick(recorder_t *r, uint32_t now_ms, uint32_t rx_last_ms, bool rx_ever) {
     // wedge: strictly > silence window, only after the target was ever active, fire ONCE per silence.
-    if (!r->wedge_active && r->ever_active && (now_ms - r->last_rx_ms) > REC_WEDGE_SILENCE_MS) {
+    // rx_last_ms/rx_ever are PRODUCER-sourced (passed in), so consumer backlog can't fake a wedge.
+    if (!r->wedge_active && rx_ever && (now_ms - rx_last_ms) > REC_WEDGE_SILENCE_MS) {
         r->wedge_active = true;
         stamp(r, now_ms, r->wedge_since, sizeof r->wedge_since);
         if (r->logging) {

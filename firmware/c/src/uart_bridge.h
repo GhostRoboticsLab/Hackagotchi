@@ -32,6 +32,16 @@ uint32_t uart_bridge_highwater(void);  // max ring fill observed (bytes) — bur
 // here to keep all UART-bridge telemetry getters in one place.
 uint32_t cdc_uart_tx_overflow(void);
 
+// M2: tee captured target-RX bytes into a SECOND SPSC ring for the low-prio recorder, so the bridge
+// (cdc_task, high-prio) stays the SINGLE consumer of the primary ring. Producer = cdc_task; consumer =
+// the recorder/SD task. Also stamps PRODUCER-sourced RX liveness so the recorder's wedge timer is
+// accurate even when the low-prio recorder is backlogged.
+void     uart_bridge_tee(const uint8_t *data, size_t n, uint32_t now_ms);  // producer (cdc_task)
+size_t   uart_bridge_rec_read(uint8_t *dst, size_t max);                   // consumer (recorder task)
+uint32_t uart_bridge_rec_drops(void);     // bytes dropped to the recorder ring being full
+uint32_t uart_bridge_rx_last_ms(void);    // last time target bytes were seen (for the wedge timer)
+bool     uart_bridge_rx_ever(void);        // has the target ever sent a byte?
+
 // PL011 internal loopback (TX wired to RX inside the chip) — a jumper-free HIL self-test of the full
 // capture path. NOT a product feature; toggled only by the test command.
 void uart_bridge_set_loopback(uart_inst_t *uart, bool on);

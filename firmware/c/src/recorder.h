@@ -7,10 +7,12 @@
  * only the injected recorder_hw_t seam — so the whole state machine compiles + unit-tests on the host
  * (tests/m2/recorder_test.c) with in-memory mocks. On-device the seam is wired to carlk3 FatFs + RTC.
  *
- * Concurrency (the device wiring, not enforced by this file): recorder_note_rx() is the CHEAP hot-path
- * hook (high-prio drain stamps liveness); recorder_feed() does the per-byte scan + freeze + buffering
- * OFF the hot path (low-prio recorder task). Splitting them means a backlogged consumer cannot
- * manufacture a false wedge (last_rx is stamped by the producer). recorder_tick() is the periodic driver.
+ * Concurrency boundary (the device wiring): the recorder_t is owned SOLELY by the low-priority recorder
+ * task — no other task touches it (no races). The high-priority producer (cdc_task) shares only (a) the
+ * SPSC staging ring it tees bytes into, and (b) two atomic liveness values (last-rx-ms, ever-active)
+ * that the recorder task reads and passes into recorder_tick(). Stamping liveness in the PRODUCER (not
+ * the consumer) means a backlogged recorder task cannot manufacture a false wedge. recorder_feed() does
+ * the off-hot-path scan/freeze/buffer + counters; recorder_tick() is the periodic driver.
  */
 #ifndef HACKAGOTCHI_RECORDER_H
 #define HACKAGOTCHI_RECORDER_H
@@ -59,9 +61,7 @@ typedef struct {
     uint32_t last_hb_ms;
     uint32_t last_tp_ms;
 
-    // wedge detector
-    bool     ever_active;
-    uint32_t last_rx_ms;
+    // wedge detector (liveness — last_rx_ms / ever_active — is PRODUCER-sourced and passed into _tick)
     bool     wedge_active;
     char     wedge_since[24];
     uint8_t  freeze[REC_FREEZE_CAP];   // ring
@@ -98,14 +98,14 @@ void recorder_init(recorder_t *r, const recorder_hw_t *hw, uint32_t baud);
 bool recorder_start(recorder_t *r, uint32_t now_ms);
 void recorder_stop(recorder_t *r);
 
-// PRODUCER (hot path): cheap liveness stamp for n received target bytes. Clears a wedge on resume.
-void recorder_note_rx(recorder_t *r, uint32_t now_ms, size_t n);
-
-// CONSUMER (low-prio): buffer the bytes for the log + extend the freeze ring + per-byte trigger scan.
+// CONSUMER (low-prio recorder task): process drained target bytes — log buffering + freeze ring +
+// per-byte trigger scan + rx/throughput counters + clear a wedge on resume. Owns recorder_t.
 void recorder_feed(recorder_t *r, const uint8_t *data, size_t n, uint32_t now_ms);
 
-// Periodic driver: wedge detection, heartbeat marker, throughput sample, idle flush.
-void recorder_tick(recorder_t *r, uint32_t now_ms);
+// Periodic driver: wedge detection (using the PRODUCER-sourced liveness passed in), heartbeat marker,
+// throughput sample, idle flush. `rx_last_ms`/`rx_ever` come from the high-prio producer (atomic),
+// NOT from the recorder task's own drain, so consumer backlog can't fake a wedge.
+void recorder_tick(recorder_t *r, uint32_t now_ms, uint32_t rx_last_ms, bool rx_ever);
 
 void recorder_get_status(const recorder_t *r, recorder_status_t *out);
 

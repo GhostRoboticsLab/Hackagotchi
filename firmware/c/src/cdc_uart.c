@@ -122,6 +122,11 @@ bool cdc_task(void)
     // the host is disconnected accumulate in the ring (bounded) until it drains or overflows.
     rx_len = uart_bridge_read(rx_buf, sizeof(rx_buf));
 
+    // [HACKAGOTCHI] M2: tee EVERY captured byte to the recorder ring + stamp liveness, regardless of
+    // CDC0 host connection (the black box records even with no host attached). cdc_task is the sole
+    // producer of that ring; the low-prio recorder task is the sole consumer.
+    if (rx_len) uart_bridge_tee(rx_buf, rx_len, (uint32_t)(time_us_64() / 1000ull));
+
     if (tud_cdc_connected()) {
         was_connected = 1;
         int written = 0;

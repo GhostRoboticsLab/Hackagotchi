@@ -179,7 +179,10 @@ int main(void) {
     usb_serial_init();
     cdc_uart_init();
     tusb_init();
-    stdio_uart_init();
+    // [HACKAGOTCHI] M2: do NOT stdio_uart_init() — that routes printf/probe_info onto uart0 = GP0, which
+    // is the bridge TX (the target's RX line). The probe must never inject its own bytes onto the target
+    // UART. Probe telemetry is served over CDC1 ({"q":"status"}); faults live in the crash box. So
+    // probe_info() below is now a no-op on the wire (its stdio backend is gone) — that is intentional.
 
     DAP_Setup();
 

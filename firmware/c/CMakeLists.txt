@@ -63,7 +63,8 @@ add_executable(hackagotchi_probe
         ${CMAKE_CURRENT_LIST_DIR}/src/crash_box.c            # M1: post-mortem crash box + HardFault handler
         ${CMAKE_CURRENT_LIST_DIR}/src/watchdog_task.c        # M1: SW watchdog (HW WDT + per-task check-in)
         ${CMAKE_CURRENT_LIST_DIR}/src/sd/hw_config.c         # M2: carlk3 SD pin map (SPI0 GP2/3/4/CS28)
-        ${CMAKE_CURRENT_LIST_DIR}/src/sd_gate.c              # M2: SD bring-up gate (mount/write/readback)
+        ${CMAKE_CURRENT_LIST_DIR}/src/sd_gate.c              # M2: SD bring-up gate + recorder/SD task
+        ${CMAKE_CURRENT_LIST_DIR}/src/recorder.c             # M2: black-box recorder core (host-tested)
         # --- pristine upstream debugprobe sources ---
         ${UPSTREAM}/src/probe_config.c
         ${UPSTREAM}/src/probe.c

@@ -88,9 +88,54 @@ freeze bytes; heartbeat at >60 s with rx count; throughput peak; RTC-trusted wal
 
 **Verdict: PASS** — the recorder logic is rank-1 host-verified; only the hardware wiring remains.
 
+---
+
+## Increment 3 — recorder wired to hardware — **PASS (live, 2026-06-20)**
+
+**Falsifiable claim.** The recorder core, wired to the live UART bridge + carlk3 FatFs, captures target
+UART RX to session log files on the SD card, off the DAP hot path, with DAP and the M1 core unaffected —
+and the headline black-box behaviours (clean capture, heartbeat, wedge + freeze frame) happen on real
+hardware.
+
+**Wiring.**
+- **Two rings, race-free.** `cdc_task` (high-prio) drains the M1 primary ring → CDC0 AND tees every
+  captured byte into a SECOND SPSC ring (`uart_bridge_tee`), stamping producer-sourced RX liveness
+  (`s_rx_last_ms`/`s_rx_ever`). The low-prio SD task is the SOLE consumer of ring2 and SOLE owner of the
+  `recorder_t` — no shared-state race, and a backlogged recorder can't fake a wedge (liveness is the
+  producer's, passed into `recorder_tick`). The recorder API was refactored to this boundary (folded the
+  old `recorder_note_rx` into `recorder_feed`; `recorder_tick(r, now, rx_last_ms, rx_ever)`); host test
+  still 31/31.
+- **`recorder_hw_t` → carlk3 FatFs** (`src/sd_gate.c`, the single FatFs caller): `sd_max_log_index` via
+  `f_findfirst("log_*.txt")`, `sd_open_append` via `FA_OPEN_APPEND`, close-syncs per flush (durable),
+  `FR_DENIED` → SD-full. RTC stub returns false (uptime stamp) until M2.4. Auto-starts logging at boot.
+- **CDC1**: `{"q":"rec"}` (logging/file/rx/wedge/hits/err/tp_peak/rec_drop/alert) + `{"q":"tail"}` (async:
+  the SD task reads the current log tail off the hot path; CDC1 returns it) for on-card content proof.
+
+**A real bug this surfaced + fixed.** The probe routed its OWN stdout to uart0 = GP0 (the bridge TX) via
+`stdio_uart_init()` + a Gate-1 `printf("HEAP n=...")` in the dashboard task — injecting the probe's
+telemetry onto the **target's RX line** (visible because internal loopback reflects GP0→GP1). Removed
+both: the probe must never transmit on the target lines; its telemetry is on CDC1, faults in the crash
+box. uart0 stays fully initialised by `cdc_uart_init` (proven: the host→target round-trip still echoes).
+
+**Result (live, m2c image).** Loopback-injected `HELLO-RECORDER-M2-CLEAN-0123456789` →
+`{"q":"rec"}` = `rx:35, tp_peak:35, err:0, rec_drop:0`; `{"q":"tail"}` of the on-card file:
+```
+=== BLACK BOX log_007.txt | start +0s | baud 115200 ===
+--- BB +60s rx=0 ---  /  +120s  /  +180s       (heartbeat firing on schedule)
+HELLO-RECORDER-M2-CLEAN-0123456789             (clean — no probe chatter)
+--- WEDGE +217s last=[HELLO-RECORDER-M2-CLEAN-012345678]   (wedge + freeze frame on >8s silence)
+```
+Session numbering increments across reboots (007→010 through the M1 crash/watchdog reboots). DAP binds;
+M1 regression green (jsmn, crash box hardfault+mallocfail on the 44 KB heap, watchdog). RAM 265.7/270 KB
+(98%) under copy_to_ram.
+
+**Verdict: PASS** — the black box records to SD on real hardware: clean capture, heartbeat, wedge +
+freeze frame, robust session numbering, DAP coexistence. The probe no longer pollutes the target line.
+
 ### Remaining in M2
-- Recorder core (`recorder.c` behind a `recorder_hw_t` vtable) + host unit tests (session naming,
-  flush, visible-stop, wedge state machine, freeze ring, heartbeat) — pure logic, like `ring_test.c`.
-- Wire to hardware: ring2 + `cdc_task` fan-out + the low-prio recorder draining ring2 → SD; CDC1 status
-  (`logging`/`log_file`/`wedge`/`hits`). HIL: a real session log appears; SD-write-during-flash soak.
-- RTC timestamps: PCF8563 driver (i2c1, mutex'd with the OLED), `log_stamp`; HIL-confirm 0x51 reg 0x02.
+- The sustained **SD-write-during-flash coexistence soak** (the heavy R1 proof — recorder writing
+  continuously while a target is flashed) is the next step; basic coexistence (DAP binds with the
+  recorder running + logging) holds.
+- **RAM 98%** — `FF_USE_LFN=0` (rename `hg_sdgate.txt`→8.3 first) reclaims the LFN unicode tables.
+- RTC timestamps: PCF8563 driver (i2c1, mutex'd with the OLED), `log_stamp`; HIL-confirm 0x51 reg 0x02
+  (currently uptime `+Ns`).

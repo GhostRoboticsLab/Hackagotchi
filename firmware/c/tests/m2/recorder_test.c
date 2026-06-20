@@ -57,10 +57,13 @@ static void reset_mock(void) {
     mk_rtc_ok = false; mk_alert_count = 0; mk_alert_last[0] = '\0';
 }
 static int cap_has(const char *s) { mk_cap[mk_cap_len] = '\0'; return strstr(mk_cap, s) != NULL; }
-static void feed(recorder_t *r, const char *s, uint32_t now) {  // simulate target bytes arriving
-    recorder_note_rx(r, now, strlen(s));
+static void feed(recorder_t *r, const char *s, uint32_t now) {  // recorder task draining target bytes
     recorder_feed(r, (const uint8_t *)s, strlen(s), now);
 }
+// tick with no rx liveness (rx_ever=false -> never wedges) — for flush/heartbeat/throughput cases
+static void tick_idle(recorder_t *r, uint32_t now) { recorder_tick(r, now, now, false); }
+// tick with the target last seen at `rx_last` and ever-active true — for wedge cases
+static void tick_live(recorder_t *r, uint32_t now, uint32_t rx_last) { recorder_tick(r, now, rx_last, true); }
 
 int main(void) {
     printf("== recorder core host test ==\n");
@@ -89,7 +92,7 @@ int main(void) {
     size_t after_hdr = mk_cap_len;
     feed(&r, "0123456789", 10);                 // 10 bytes buffered
     CHECK(mk_cap_len == after_hdr, "small feed not yet flushed");
-    recorder_tick(&r, 600);                      // >500ms idle -> flush
+    tick_idle(&r, 600);                          // >500ms idle -> flush
     CHECK(mk_cap_len > after_hdr, "idle flush after 500ms");
     reset_mock(); recorder_init(&r, &MOCK, 115200); recorder_start(&r, 0); after_hdr = mk_cap_len;
     char chunk[70]; memset(chunk, 'x', sizeof chunk); chunk[69] = '\0';
@@ -111,20 +114,18 @@ int main(void) {
 
     /* E. wedge state machine (strict >8000ms, fire once, recovered) */
     reset_mock(); recorder_init(&r, &MOCK, 115200); recorder_start(&r, 0);
-    recorder_tick(&r, 20000); recorder_get_status(&r, &st);
+    recorder_tick(&r, 20000, 0, false); recorder_get_status(&r, &st);  // rx_ever=false
     CHECK(!st.wedge, "no wedge before any rx (ever_active false)");
-    recorder_note_rx(&r, 20000, 5);
-    recorder_tick(&r, 28000); recorder_get_status(&r, &st);
+    // target last seen at t=20000, now ever-active:
+    tick_live(&r, 28000, 20000); recorder_get_status(&r, &st);
     CHECK(!st.wedge, "silence of exactly 8000ms does not wedge (strict >)");
-    int a0 = mk_alert_count;
-    recorder_tick(&r, 28001); recorder_get_status(&r, &st);
+    tick_live(&r, 28001, 20000); recorder_get_status(&r, &st);
     CHECK(st.wedge, "silence of 8001ms wedges");
     CHECK(strncmp(mk_alert_last, "WEDGE", 5) == 0, "wedge fired a WEDGE alert");
     int a1 = mk_alert_count;
-    recorder_tick(&r, 40000);                    // still silent
+    tick_live(&r, 40000, 20000);                 // still silent
     CHECK(mk_alert_count == a1, "wedge fires only ONCE while still silent");
-    (void)a0;
-    recorder_note_rx(&r, 41000, 3); recorder_get_status(&r, &st);
+    feed(&r, "z", 41000); recorder_get_status(&r, &st);  // drained resumed bytes -> recovered
     CHECK(!st.wedge, "rx resume clears the wedge");
     CHECK(strcmp(mk_alert_last, "RECOVERED") == 0, "recovered alert on resume");
 
@@ -150,7 +151,7 @@ int main(void) {
         char as[41]; memset(as, 'A', 40); as[40] = '\0';
         char bs[81]; memset(bs, 'B', 80); bs[80] = '\0';
         feed(&r, as, 0); feed(&r, bs, 0);
-        recorder_tick(&r, 9000);                 // >8000ms silence -> wedge writes the freeze line
+        tick_live(&r, 9000, 0);                  // target last seen t=0, >8000ms silence -> wedge
         recorder_get_status(&r, &st);
         CHECK(st.wedge, "wedge fired for freeze test");
         char want[88]; memset(want, 'B', 80); want[80] = '\0';
@@ -159,14 +160,14 @@ int main(void) {
 
     /* H. heartbeat at 60s */
     reset_mock(); recorder_init(&r, &MOCK, 115200); recorder_start(&r, 0);
-    recorder_note_rx(&r, 0, 50);
-    recorder_tick(&r, 30000); CHECK(!cap_has("--- BB"), "no heartbeat before 60s");
-    recorder_tick(&r, 60001); CHECK(cap_has("--- BB") && cap_has("rx=50"), "heartbeat at >60s with rx count");
+    {   char fifty[51]; memset(fifty, 'h', 50); fifty[50] = '\0'; feed(&r, fifty, 0); }  // rx_total=50
+    tick_idle(&r, 30000); CHECK(!cap_has("--- BB"), "no heartbeat before 60s");
+    tick_idle(&r, 60001); CHECK(cap_has("--- BB") && cap_has("rx=50"), "heartbeat at >60s with rx count");
 
     /* I. throughput sampler (per >=1000ms) */
     reset_mock(); recorder_init(&r, &MOCK, 115200); recorder_start(&r, 0);
-    recorder_note_rx(&r, 0, 100);
-    recorder_tick(&r, 1000); recorder_get_status(&r, &st);
+    {   char hundred[101]; memset(hundred, 'p', 100); hundred[100] = '\0'; feed(&r, hundred, 0); }  // tp_accum=100
+    tick_idle(&r, 1000); recorder_get_status(&r, &st);
     CHECK(st.tp_peak == 100, "throughput peak sampled");
 
     /* J. RTC wall-clock stamp when trusted */
