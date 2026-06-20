@@ -3,6 +3,7 @@ upstream/
 
 # Build outputs
 build/
+build-gate1-adv/
 
 # Gate-run evidence (regenerated on hardware; keep templates/scripts, not run artifacts)
 tests/gates/gate0/
