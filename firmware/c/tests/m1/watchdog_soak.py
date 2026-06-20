@@ -114,15 +114,22 @@ def main():
         time.sleep(0.4)
         c.read(100)
 
+        # Zero the watchdog's stall peak so wd_gap reflects ONLY this run (not the boot floor) — without
+        # this, wd_gap is a stale latched value and any margin check on it is constant-true.
+        c.write(b'{"q":"wd_reset"}\n')
+        c.flush()
+        time.sleep(0.3)
+        c.read(100)
+
         base = status(c)
         up0, cr0, armed = field_int(base, "up"), field_int(base, "crashes"), field_int(base, "wd_armed")
-        gap0 = field_int(base, "wd_gap")
+        tud0 = field_int(base, "tud")
         print(f"[baseline] {base}")
         if armed != 1:
             print("FAIL: watchdog is not armed by default (wd_armed != 1)")
             return 1
-        if gap0 is None:
-            print("FAIL: status has no wd_gap field — wrong/old firmware")
+        if tud0 is None:
+            print("FAIL: status has no tud field — wrong/old firmware")
             return 1
         last_up = up0
 
@@ -160,17 +167,24 @@ def main():
         final = status(c)
         up1, cr1 = field_int(final, "up"), field_int(final, "crashes")
         gap1 = field_int(final, "wd_gap")
+        tud1 = field_int(final, "tud")
         c.write(b'{"q":"uloop_off"}\n')
         c.flush()
         print(f"[final] {final}")
 
-    # WD_TUD_STALL_MS is 4000; a healthy margin keeps the worst-case observed gap well under half that.
-    GAP_CEIL = 2000
+    GAP_CEIL = 1500       # >=3 missed 500ms windows post-reset = TUD nearing the 4000ms stall threshold
+    TUD_MIN_ADVANCE = 10000  # the heartbeat must have advanced a LOT -> load genuinely reached TUD
+    tud_delta = (tud1 - tud0) if (tud1 is not None and tud0 is not None) else 0
     # verdict
     if fired:
         return 1
     if flash["ok"] < MIN_FLASHES:
         print(f"FAIL: only {flash['ok']} flashes succeeded (< {MIN_FLASHES}) — DAP load was a no-op, soak invalid")
+        return 1
+    # POSITIVE proof the load actually reached the MONITORED task (not just 'didn't reboot while idle').
+    if tud_delta < TUD_MIN_ADVANCE:
+        print(f"FAIL: TUD heartbeat only advanced {tud_delta} (< {TUD_MIN_ADVANCE}) — load did not reach "
+              f"the monitored task, soak inconclusive")
         return 1
     if cr1 != cr0:
         print(f"FAIL: crashes changed {cr0}->{cr1}")
@@ -178,14 +192,14 @@ def main():
     if up1 is None or up0 is None or up1 < up0:
         print(f"FAIL: up not monotonic ({up0}->{up1}) — probe rebooted")
         return 1
+    # wd_gap was RESET at soak start, so this is the worst missed-window count DURING this run (not the
+    # boot floor). Healthy = 0; climbing = TUD nearing the stall threshold.
     if gap1 is None or gap1 >= GAP_CEIL:
-        print(f"FAIL: worst-case TUD stall margin wd_gap={gap1}ms reached/exceeded {GAP_CEIL}ms "
-              f"(threshold 4000ms) — TUD approached the stall window under load")
+        print(f"FAIL: wd_gap={gap1}ms (since reset) reached/exceeded {GAP_CEIL}ms — TUD stalled under load")
         return 1
-    print(f"\nPASS: armed watchdog did NOT false-fire under load "
-          f"({flash['ok']} flashes [{flash['fail']} failed] + {fh_bytes//1024}KB CDC firehose; "
-          f"up {up0}->{up1} monotonic, crashes steady at {cr1}; "
-          f"MEASURED worst-case TUD stall margin wd_gap {gap0}->{gap1}ms << 4000ms threshold)")
+    print(f"\nPASS: under real load (TUD heartbeat +{tud_delta}, {flash['ok']} flashes [{flash['fail']} "
+          f"failed], {fh_bytes//1024}KB firehose) the armed watchdog did NOT false-fire: "
+          f"up {up0}->{up1} monotonic, crashes steady at {cr1}, wd_gap {gap1}ms (since reset) << 4000ms")
     return 0
 
 

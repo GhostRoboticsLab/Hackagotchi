@@ -81,6 +81,9 @@ def main():
     # wd_arm is idempotent (already armed); confirm it still reports armed
     armed = query(port, '{"q":"wd_arm"}\n')
     print(f"[arm] reply: {armed}")
+    if '"wd":"armed"' not in armed:
+        print("FAIL: wd_arm did not reply armed (control dispatch broken)")
+        return 1
 
     # wedge the TUD task -> the armed watchdog must catch it and reboot
     print('\n[wedge] sending {"q":"wd_test"} -> TUD task wedges; watchdog should reboot in ~4-8s ...')

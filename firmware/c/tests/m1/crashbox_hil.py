@@ -76,6 +76,7 @@ def main():
     print(f"[baseline] status   : {status}")
 
     crashes0 = field_int(status, "crashes")
+    up_before = field_int(status, "up")
     last0 = query(port, '{"q":"lastfault"}\n')
     print(f"[baseline] lastfault: {last0}")
     print(f"[baseline] crashes  : {crashes0}")
@@ -119,6 +120,11 @@ def main():
         ok = False
     if crashes1 is None or crashes0 is None or crashes1 != crashes0 + 1:
         print(f"FAIL: crash count did not advance by 1 ({crashes0} -> {crashes1})")
+        ok = False
+    # Independent reboot witness: uptime must have reset (same /dev node alone doesn't prove a reboot).
+    up_after = field_int(status2, "up")
+    if up_before is None or up_after is None or up_after >= up_before:
+        print(f"FAIL: uptime did not reset ({up_before}s -> {up_after}s) — no reboot witnessed")
         ok = False
 
     if not ok:

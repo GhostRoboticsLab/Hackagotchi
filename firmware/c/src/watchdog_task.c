@@ -29,6 +29,7 @@ static volatile uint32_t s_max_gap_ms = 0;
 void wd_arm(void)         { s_armed = true; }
 bool wd_is_armed(void)    { return s_armed; }
 uint32_t wd_max_gap_ms(void) { return s_max_gap_ms; }
+void wd_gap_reset(void)   { s_max_gap_ms = 0; }  // zero the peak so a test measures only its own run
 
 void watchdog_task(void *ptr) {
     (void)ptr;
