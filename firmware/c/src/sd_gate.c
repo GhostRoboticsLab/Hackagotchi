@@ -148,6 +148,12 @@ static rtc_dt_t          s_rtc_cache;       // wall-clock cached here (~1 Hz) so
 static bool              s_rtc_valid = false;  //   takes the i2c1 bus for time — only the OLED show does
 static uint32_t          s_rtc_poll_ms = 0;
 
+// M3 closeout: {"q":"settime"} latches a request consumed by THIS (SD) task, so the i2c1 RTC write never
+// runs on the TUD task (idle+2, ABOVE DAP) — keeps every i2c1 contender at idle+0 (no PI on the DAP path).
+static volatile bool s_settime_pending = false;
+static rtc_dt_t      s_settime_val;
+void sd_settime_request(const rtc_dt_t *t) { s_settime_val = *t; s_settime_pending = true; }
+
 static void publish_snapshot(void) {
     rec_snapshot_t s;
     memset(&s, 0, sizeof s);
@@ -184,12 +190,39 @@ bool dash_get_rec_snapshot(rec_snapshot_t *out) {
     return false;
 }
 
+// M3.3 — map recorder events to the buzzer + NeoPixel (non-blocking, via the feedback HAL). Called each
+// loop from the OWNING task, so recorder_get_status(&g_rec) is race-free here. The status COLOUR is set
+// only on change (green=recording OK, red=wedge/fault), so CDC1 pixel/led tests can coexist between
+// events; the buzzer fires on EDGES only (wedge alarm / recovery chirp / SD-fault buzz / trigger blip).
+static void drive_feedback(void) {
+    if (!s_mounted) return;
+    static bool     first = true, last_wedge = false, last_err = false;
+    static uint32_t last_hits = 0, last_color = 0xFFFFFFFFu;
+    recorder_status_t st;
+    recorder_get_status(&g_rec, &st);
+    bool err = (st.last_err != REC_ERR_NONE);
+
+    if (!first) {
+        if (st.wedge && !last_wedge)      feedback_beep(700, 500);    // target wedged -> alarm
+        else if (!st.wedge && last_wedge) feedback_beep(2200, 80);    // recovered -> chirp
+        if (err && !last_err)             feedback_beep(500, 700);    // SD write/full fault -> buzz
+        if (st.hits > last_hits)          feedback_beep(2600, 70);    // trigger-term hit -> blip
+    }
+    uint32_t color = (st.wedge || err) ? 0x400000u : (st.logging ? 0x001000u : 0u);  // red / dim green / off
+    if (color != last_color) {
+        feedback_pixel((uint8_t)(color >> 16), (uint8_t)(color >> 8), (uint8_t)color);
+        last_color = color;
+    }
+    last_wedge = st.wedge; last_err = err; last_hits = st.hits; first = false;
+}
+
 void sd_gate_task(void *ptr) {
     (void)ptr;
     run_selftest();
     if (s_mounted) {
         recorder_init(&g_rec, &REC_HW, PROBE_UART_BAUDRATE);
         recorder_start(&g_rec, (uint32_t)(time_us_64() / 1000ull));   // auto-start logging at boot
+        feedback_beep(2000, 60);   // M3.3: a single "alive" chirp at boot (full jingles -> UI rewrite)
     }
     static uint8_t drain[256];
     for (;;) {
@@ -207,6 +240,10 @@ void sd_gate_task(void *ptr) {
         if (s_tail_req) { do_tail_read(); s_tail_req = false; }
         // M3: cache the wall-clock here (~1 Hz) so the dashboard renders time with ZERO i2c1 access —
         // only the OLED show takes the bus, keeping the i2c1 contenders at two (no extra RTC reader).
+        if (s_settime_pending) {   // host {"q":"settime"} — applied HERE (idle+0), never on the TUD task
+            s_settime_pending = false;
+            if (rtc_pcf8563_set(&s_settime_val)) { s_rtc_cache = s_settime_val; s_rtc_valid = true; s_rtc_poll_ms = now; }
+        }
         if (now - s_rtc_poll_ms >= 1000u) {
             s_rtc_poll_ms = now;
             rtc_dt_t dt;
@@ -214,7 +251,8 @@ void sd_gate_task(void *ptr) {
             else s_rtc_valid = false;
         }
         publish_snapshot();          // M3: hand the dashboard + CDC1 a consistent copy of recorder state
-        feedback_service(now);       // M3.0: drive the non-blocking buzzer-off + LEDs off the hot path
+        drive_feedback();            // M3.3: map recorder events -> buzzer + NeoPixel (edge-detected)
+        feedback_service(now);       // M3.0: apply the latched beep/pixel + buzzer-off, off the hot path
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }

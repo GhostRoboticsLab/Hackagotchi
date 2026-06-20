@@ -106,14 +106,15 @@ logging/file/rx/drop/peak/wedge/hits/clock, entirely from the published snapshot
 remaining core screens (Mascot · Sniffer/live-UART · Throughput · Clock) are M3.2; all data plumbing is
 ready. Trivial primitives ported inline: `fmt_bytes`, header (title + y=9 divider), `sline` text model.
 
-**Input.** Auto-cycle every 5 s + CDC1 `{"q":"next"}` / `{"q":"prev"}` / `{"q":"screen","n":N}`; a manual
-nav resets the auto-cycle clock. `{"q":"screen"}` (no n) returns the attestation.
+**Input.** Auto-cycle every `DASH_CYCLE_MS` (6 s) + CDC1 `{"q":"next"}` / `{"q":"prev"}` /
+`{"q":"screen","n":N}`; a manual nav resets the auto-cycle clock. `{"q":"screen"}` (no n) returns the
+attestation. (M3.1 originally shipped this at 5 s; M3.2 set it to 6 s — the value of record.)
 
 **HIL (`tests/m3/screen_hil.py`, all OK):**
 - boots on screen 0 (text contains `HACKAGOTCHI`); `next` → screen 1 (`RECORDER`); `prev` → screen 0.
 - screen 1's text carries the LIVE snapshot filename (matched against `{"q":"rec"}`) — content is real.
 - `{"q":"screen","n":99}` → CLAMPED to a valid index, `crashes==0` (no OOB hardfault).
-- **auto-cycle** advanced 0→1 after ~5 s with zero input.
+- **auto-cycle** advanced 0→1 after the cycle interval with zero input.
 - **`shows`==`loops`** and climbing (every frame flushed — the panel is genuinely being driven; not a
   skipped/dark path), `dstack` ≈ 884 words free (stack healthy). RTC clock ticks live in the text.
 - **Operator glance:** OLED auto-cycling between the PROBE and RECORDER screens (panel confirmed lit —
@@ -164,3 +165,86 @@ did not regress DAP or starve the recorder.
 feasible screen set, snapshot-fed, R1-clean. (Future graphics rewrite: see `docs/hackagotchiUI_upgrade_v1.1.md`.)
 
 Build: `BUILD_DIR=/tmp/hg-build-m32 ./build_fork.sh`. Device resting on `/tmp/hg-build-m32`.
+
+---
+
+## Increment M3.3 — buzzer + NeoPixel event feedback — **PASS (live, 2026-06-21)**
+
+**Falsifiable claim.** Recorder EVENTS (target wedge, SD fault, trigger-term hit) drive the buzzer + the
+NeoPixel status colour, non-blocking and off the DAP hot path, and the feedback layer is machine-provable
+(not just the recorder transition).
+
+**Implementation (`src/sd_gate.c` `drive_feedback()`, run each loop on the recorder-owning SD task).**
+Edge-detected buzzer: wedge→700 Hz/500 ms alarm, recovery→2200 Hz chirp, SD-fault→500 Hz/700 ms buzz,
+trigger-hit→2600 Hz blip; a single "alive" chirp at boot. Persistent status COLOUR on the WS2812 (set only
+on change so CDC1 pixel/led tests coexist): red = wedge/fault, dim-green = logging OK, off otherwise.
+`recorder_get_status(&g_rec)` is race-free here (owning task). probe-active (DAP-busy) signal **deferred** —
+see the closeout recipe below.
+
+**HIL (`tests/m3/feedback_hil.py`, all OK).** Real conditions over the UART loopback: inject `FATAL:` →
+`hits=1`/`alert=HIT FATAL`; 9 s silence → `wedge=1`; resume → `wedge=0`/`RECOVERED`. AND the feedback
+layer is asserted via `{"q":"fb"}` (beep count + applied NeoPixel colour): boot chirp (beeps=1, green) →
+trigger (beeps=2) → wedge (beeps=3, **RED** r=64/g=0) → recovery (beeps=4, **GREEN** r=0/g=16). A no-op
+feedback layer now FAILS this test. Operator confirmed boot chirp + trigger blip + wedge alarm/red +
+recovery chirp/green on the hardware. R1 re-soak (fresh boot): coexist 120 cycles 0/0, rec_drop=0.
+
+**Verdict: PASS.** Event feedback is wired, edge-correct, machine-checkable, and R1-clean.
+
+---
+
+## M3 closeout — adversarial audit + fixes — **M3 COMPLETE (2026-06-21)**
+
+Ran a 3-lens adversarial closeout audit (workflow `m3-closeout-audit`: concurrency/R1 · test-rigor ·
+doc/code). Verdict **COMPLETE-WITH-NITS, no blockers** — the concurrency core was verified sound (single-
+writer seqlock correct for this single-core preemptive model; drive_feedback on the owning task; NeoPixel
+on pio1 vs SWD pio0; dashboard reads only the snapshot; no DAP hot-path block). It caught real silent-passes,
+**all fixed before declaring M3 complete** (re-verified by re-running the HIL suite):
+
+1. **show-success counter was a false dark-panel detector** (HIGH/silent-pass). `ssd1306_show()` was void
+   and `fancy_write` swallowed I2C NAK/timeout, so `g_dash_shows` ticked on bus-lock-acquired, not panel-
+   ACKed. **Fix:** `ssd1306_show()`/`fancy_write` now return the `i2c_write_blocking` status; the dashboard
+   ticks `g_dash_shows` ONLY on `>= 0`. A NAKing/absent OLED now gives `shows < loops`.
+2. **`feedback_hil.py` tested the wrong layer** (HIGH/silent-pass). It asserted only recorder transitions
+   (produced by `recorder.c`), so a no-op feedback layer would pass. **Fix:** added `{"q":"fb"}` (beep
+   count + applied colour); `feedback_hil.py` now asserts the buzzer beeped + the pixel went red/green.
+3. **`{"q":"time"}`/`{"q":"settime"}` took i2c1 from the TUD task (idle+2, ABOVE DAP)** — the one M3 path
+   that could PI-perturb DAP via the OLED bus hold (bounded/operator-only, not an R1 break). **Fix:**
+   `{"q":"time"}` now reads the cached snapshot clock; `{"q":"settime"}` posts a request applied by the SD
+   task (idle+0). No i2c1 lock is ever taken above DAP. (`rtc_hil.py` updated for the async `set:"queued"`.)
+4. **Filename content check was a tautology** when SD unmounted / snapshot busy. **Fix:** `screen_hil.py`
+   asserts the file is non-empty AND matches `log_\d+\.txt` before checking it appears on screen.
+5. **Auto-cycle test was boundary-flaky** (6.0 s sleep vs 6 s cycle) + 5 s/6 s doc drift. **Fix:** sleep
+   7.5 s, assert exactly one advance `b == (a+1)%n`; docs corrected to 6 s.
+6. **Stale `{"q":"led"}` comment** said GP17/16 (abandoned per Finding M3-1). **Fix:** comment now says
+   the NeoPixel.
+7. **`coexist_soak.py` had its OWN silent-pass** (found re-running the soak during closeout): its
+   `"fails=0 stalls=0" in proc.stdout` check substring-matched a per-batch PROGRESS line, so it printed
+   PASS even when the authoritative `DONE` line tallied `fails=2`. **Fix:** parse the `DONE` line; bar is
+   now **0 stalls (hard)** + retryable fails ≤ 2% (the M2-documented SD-DMA caveat), with the real numbers
+   printed so any true regression (a stall, or a fails spike) is visible.
+
+**Deferred (documented), with recipe — probe-active (DAP-busy) indicator.** Not implemented: it requires
+instrumenting the upstream DAP path, the single highest-risk change (R1-protected hot path + breaks the
+pristine-upstream overlay) for marginal value (the dashboard is already rich). **Recipe if ever wanted:**
+add a free-running `volatile uint32_t g_dap_last_ms` stamped by ONE non-blocking aligned write in the DAP
+service (`upstream/debugprobe/src/tusb_edpt_handler.c`, right after `DAP_ExecuteCommand` returns — a single
+store, NEVER a callback/lock on the hot path), behind a `// [HACKAGOTCHI]` tag (a documented 4th overlay
+touchpoint). The low-prio dashboard reads it as a delta (`now - g_dap_last_ms < ~500 ms` ⇒ "DAP active")
+and shows it on HOME + a NeoPixel tint. **Gate: it ships ONLY if a full probe-rs coexist re-soak stays
+0 stalls / rec_drop=0 — otherwise revert.** (Mirrors the producer-stamped-liveness idiom already used for
+`uart_bridge_rx_last_ms` and `g_dash_counter`.)
+
+**Disclosed, accepted (safe-to-defer nits):** attestation is a TEXT mirror — the cat/sparkline graphics and
+the watchdog blink (drawn conditionally, attested unconditionally) ride the operator glance, not the text
+attest. A latched SD write-fault pins the NeoPixel red until restart (`last_err` clears only on
+`recorder_start`). Rapid back-to-back trigger hits within one 20 ms poll coalesce to a single blip.
+
+**Post-fix HIL (build `/tmp/hg-build-m33b`):** `screen_hil.py` PASS (regex filename, exactly-one auto-cycle,
+shows climbing), `feedback_hil.py` PASS (HAL-layer asserted), `rtc_hil.py` PASS (async settime + reboot
+wall-clock stamp). **Final coexist R1 soak across this build = 0 STALLS over 840 ops (3 runs: 240+300+300),
+2 retryable 0-stall DAP fails total (0.24%, within M2's documented ~1% SD-DMA-contention caveat under
+continuous-max recgen), rec_drop=0, recorder flawless** — R1 (no hang/corruption) intact; the retryable
+fails are the known negligible caveat, not an M3 regression (two of the three runs were 0/0). **M3 = COMPLETE.**
+
+Build: `BUILD_DIR=/tmp/hg-build-m33b ./build_fork.sh`. Device resting on `/tmp/hg-build-m33b`
+(full M3: feedback HAL + snapshot boundary + 6 screens + cat + event feedback, audit-hardened).

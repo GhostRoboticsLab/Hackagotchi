@@ -41,4 +41,9 @@ void feedback_led(bool red, bool green);
 // to call from any task.
 void feedback_pixel(uint8_t r, uint8_t g, uint8_t b);
 
+// HIL readback ({"q":"fb"}): prove the HAL actually fired on an event (not just the recorder transition).
+uint32_t feedback_beep_count(void);   // beeps STARTED since boot (ticks once per edge-driven beep)
+uint32_t feedback_color(void);        // last applied NeoPixel colour, packed urgb = (g<<16)|(r<<8)|b
+bool     feedback_is_beeping(void);   // a beep is currently sounding
+
 #endif // HACKAGOTCHI_FEEDBACK_H

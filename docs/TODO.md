@@ -92,8 +92,10 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     + M2_RESULTS.md.
 - [x] **M2 SD + black-box logging — COMPLETE** *(2026-06-20)*: SD gate · recorder core (host 31/31) ·
   HW wiring · RAM-headroom (copy_to_ram→XIP, +139 KB) · PCF8563 RTC wall-clock stamps · coexistence soak.
-- [~] **M3 core screens** — IN PROGRESS (`firmware/c/tests/m3/M3_RESULTS.md`). Design of record =
-  `m3-design` workflow (screen triage + thread-safe snapshot boundary + adversarial critique).
+- [x] **M3 core screens — COMPLETE** *(2026-06-21)* (`firmware/c/tests/m3/M3_RESULTS.md`). Design of record =
+  `m3-design` workflow; closed by `m3-closeout-audit` (COMPLETE-WITH-NITS, all silent-passes fixed). The probe
+  is a reactive Tamagotchi-style dashboard (cat + 6 screens + buzzer/NeoPixel event feedback) that stays
+  R1-clean while flashing targets. Future graphics rewrite plan: `docs/hackagotchiUI_upgrade_v1.1.md`.
   - [x] **M3.0 HW-reconciliation + snapshot boundary** — **PASS, HIL-verified** *(2026-06-20)*:
     `src/feedback.{c,h}` + `src/ws2812.pio` (non-blocking buzzer GP29 + **WS2812 NeoPixel** GP12/GP11
     status LED via PIO/pio1, serviced off the hot path) + `{"q":"beep"}`/`{"q":"led"}`/`{"q":"pixel"}`.
@@ -104,7 +106,7 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     + cached RTC; **fixed the pre-existing `{"q":"rec"}` cross-task race** (live `g_rec.filename` pointer +
     off-task `hw->sd_mounted()`). Gates: DAP binds, `{"q":"rec"}`×80 0 torn, **coexist soak 0/400 + rec_drop=0**.
   - [x] **M3.1 screen framework + first screen** — **PASS, HIL-verified** *(2026-06-21)*: multi-screen
-    renderer (screen table + reader-clamped index, auto-cycle 5s + CDC1 `next`/`prev`/`{"q":"screen","n"}`).
+    renderer (screen table + reader-clamped index, auto-cycle 6s + CDC1 `next`/`prev`/`{"q":"screen","n"}`).
     Screen fns emit a TEXT MODEL drawn to the OLED AND published for **self-attestation** (`{"q":"screen"}`
     returns the exact rendered text + a **show-success counter distinct from the loop counter** so a dark
     panel can't pass). Screens: PROBE/home + RECORDER (snapshot-fed). `screen_hil.py` PASS (nav, auto-cycle,
@@ -115,7 +117,14 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     — all snapshot-fed (no direct g_rec/freeze/RTC from DASH). `screen_hil.py` PASS + live-data run (cat
     active, sniffer streaming, throughput 2.9K/s); operator confirmed render; R1 re-soak 120cyc 0/0 rec_drop=0.
     Dropped (pin conflict): scope/PWM/logic/I2C-scan. Deferred M4: macro/baud/SD-explorer, hex-sniffer.
-  - [ ] **M3.3** buzzer/LED event feedback (wedge/SD-fault/trigger) + OPTIONAL gated probe-active + closeout.
+  - [x] **M3.3 event feedback + closeout** — **PASS, HIL-verified** *(2026-06-21)*: `drive_feedback()` in
+    sd_gate.c maps recorder events (wedge→alarm+red, SD-fault→buzz+red, trigger-hit→blip, recovery→chirp+
+    green, boot chirp) to the buzzer + NeoPixel, edge-detected, off the hot path. `feedback_hil.py` asserts
+    the HAL layer via `{"q":"fb"}` (beep count + colour). **Adversarial closeout audit** (`m3-closeout-audit`)
+    = COMPLETE-WITH-NITS; fixed every silent-pass: show-counter now ACK-gated (ssd1306_show returns I2C
+    status); `{"q":"time"}`/`{"q":"settime"}` rerouted off the above-DAP TUD task (snapshot read + SD-task
+    apply); filename check de-tautologised; auto-cycle test hardened. probe-active DEFERRED with a recipe.
+    Final coexist R1 soak 0/0 rec_drop=0.
 - [ ] M4 full UI parity (Macro/Baud/SD-explorer via CDC1+snapshot redesign); M5 polish + tagged release (.uf2 + .elf).
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,
   tighter analyzers, RTT observability.

@@ -39,8 +39,11 @@ inline static void swap(int32_t *a, int32_t *b) {
     *b=*t;
 }
 
-inline static void fancy_write(i2c_inst_t *i2c, uint8_t addr, const uint8_t *src, size_t len, char *name) {
-    switch(i2c_write_blocking(i2c, addr, src, len, false)) {
+// [HACKAGOTCHI] returns the i2c_write_blocking result (>=0 bytes written, or PICO_ERROR_* <0) so the
+// caller can tell a real panel ACK from a NAK/timeout — the dashboard's show-success counter depends on it.
+inline static int fancy_write(i2c_inst_t *i2c, uint8_t addr, const uint8_t *src, size_t len, char *name) {
+    int r = i2c_write_blocking(i2c, addr, src, len, false);
+    switch(r) {
     case PICO_ERROR_GENERIC:
         printf("[%s] addr not acknowledged!\n", name);
         break;
@@ -51,6 +54,7 @@ inline static void fancy_write(i2c_inst_t *i2c, uint8_t addr, const uint8_t *src
         //printf("[%s] wrote successfully %lu bytes!\n", name, len);
         break;
     }
+    return r;
 }
 
 inline static void ssd1306_write(ssd1306_t *p, uint8_t val) {
@@ -290,7 +294,7 @@ inline void ssd1306_bmp_show_image(ssd1306_t *p, const uint8_t *data, const long
     ssd1306_bmp_show_image_with_offset(p, data, size, 0, 0);
 }
 
-void ssd1306_show(ssd1306_t *p) {
+int ssd1306_show(ssd1306_t *p) {
     uint8_t payload[]= {SET_COL_ADDR, 0, p->width-1, SET_PAGE_ADDR, 0, p->pages-1};
     if(p->width==64) {
         payload[1]+=32;
@@ -302,5 +306,7 @@ void ssd1306_show(ssd1306_t *p) {
 
     *(p->buffer-1)=0x40;
 
-    fancy_write(p->i2c_i, p->address, p->buffer-1, p->bufsize+1, "ssd1306_show");
+    // [HACKAGOTCHI] return the framebuffer-burst result (>=0 = panel ACKed) — the dashboard ticks its
+    // show-success counter only on >=0, so a NAKing/absent OLED is detectable (shows < loops).
+    return fancy_write(p->i2c_i, p->address, p->buffer-1, p->bufsize+1, "ssd1306_show");
 }

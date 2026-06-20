@@ -74,9 +74,12 @@ def main():
     setstr = now.strftime("%Y-%m-%d %H:%M:%S")
     r = q('{"q":"settime","t":"%s"}' % setstr)
     print(f"[set] settime {setstr} ->", r)
-    check(r.get("set") == 1, "settime accepted (set=1)")
+    # M3 closeout: settime is now QUEUED to the SD task (so the i2c1 RTC write never runs on the above-DAP
+    # TUD task); it returns {"set":"queued"} and the clock updates within ~1 s. Accept either form.
+    check(r.get("set") in (1, "queued"), 'settime accepted (set=1 or "queued")')
 
-    # 3) read back
+    # 3) read back (allow the SD task a moment to apply the queued set + refresh the cached clock)
+    time.sleep(1.5)
     rb = q('{"q":"time"}')
     print("[readback] time:", rb)
     check(rb.get("valid") == 1, "time now valid (VL cleared)")

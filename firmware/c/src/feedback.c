@@ -28,6 +28,14 @@ static volatile uint32_t s_beep_req = 0;
 static bool     s_beeping = false;
 static uint32_t s_beep_off_ms = 0;
 
+// Readback for HIL ({"q":"fb"}): proves drive_feedback actually drove the HAL on each event, not just the
+// recorder transition. s_beep_count ticks per beep STARTED; s_last_color is the last applied pixel colour.
+static volatile uint32_t s_beep_count = 0;
+static volatile uint32_t s_last_color = 0;
+uint32_t feedback_beep_count(void) { return s_beep_count; }
+uint32_t feedback_color(void)      { return s_last_color; }   // packed urgb: (g<<16)|(r<<8)|b
+bool     feedback_is_beeping(void) { return s_beeping; }
+
 static inline uint32_t urgb(uint8_t r, uint8_t g, uint8_t b) {  // pack for the WS2812 (GRB) helper
     return ((uint32_t)r << 8) | ((uint32_t)g << 16) | (uint32_t)b;
 }
@@ -86,7 +94,7 @@ void feedback_beep(uint16_t hz, uint16_t ms) {
 
 void feedback_service(uint32_t now_ms) {
     uint32_t px = s_pixel_req;
-    if (px & 0x80000000u) { s_pixel_req = 0; np_put(px & 0x00FFFFFFu); }
+    if (px & 0x80000000u) { s_pixel_req = 0; uint32_t c = px & 0x00FFFFFFu; np_put(c); s_last_color = c; }
 
     uint32_t req = s_beep_req;
     if (req) {
@@ -94,6 +102,7 @@ void feedback_service(uint32_t now_ms) {
         buzzer_on((uint16_t)(req >> 16));
         s_beep_off_ms = now_ms + (req & 0xFFFFu);
         s_beeping = true;
+        s_beep_count++;
     }
     if (s_beeping && (int32_t)(now_ms - s_beep_off_ms) >= 0) {
         buzzer_off();

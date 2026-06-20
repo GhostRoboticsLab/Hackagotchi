@@ -214,9 +214,11 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   // concurrent probe-rs flash soak measures pure SD-vs-DAP contention without host USB confounds.
   if (!strcmp(q, "recgen_on"))  { sd_recgen_set(true);  reply(itf, "{\"recgen\":1}\n"); return; }
   if (!strcmp(q, "recgen_off")) { sd_recgen_set(false); reply(itf, "{\"recgen\":0}\n"); return; }
-  // M3.0 HW-reconciliation: drive the buzzer (GP29) + status LEDs (GP17 red / GP16 green) to confirm the
-  // outputs work post-SWD-remap. Non-blocking (the SD task's feedback_service does the actual drive/dwell).
-  // {"q":"beep","hz":2000,"ms":120}  /  {"q":"led","r":1,"g":0}
+  // M3.0 HW-reconciliation: drive the buzzer (GP29) + the WS2812 NeoPixel (GP12/GP11) to confirm the
+  // outputs work post-SWD-remap. {"q":"led"} maps red/green flags to the NeoPixel via feedback_led ->
+  // feedback_pixel — NOT the onboard GP17/16 RGB, which Finding M3-1 abandoned as an unreliable channel.
+  // Non-blocking (the SD task's feedback_service does the actual drive/dwell).
+  // {"q":"beep","hz":2000,"ms":120}  /  {"q":"led","r":1,"g":0}  /  {"q":"pixel","r":..,"g":..,"b":..}
   if (!strcmp(q, "beep")) {
     int hz = 2000, ms = 120; get_int(line, tok, n, "hz", &hz); get_int(line, tok, n, "ms", &ms);
     feedback_beep((uint16_t)(hz < 0 ? 0 : hz), (uint16_t)(ms < 0 ? 0 : ms));
@@ -238,14 +240,16 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   }
   // M2.4: PCF8563 RTC (I2C1 @0x51, bus-mutexed with the OLED). {"q":"time"} reads;
   // {"q":"settime","t":"YYYY-MM-DD HH:MM:SS"} sets the clock (clears the VL low-voltage flag).
+  // M3 closeout: read the CACHED clock from the published snapshot — do NOT take the i2c1 bus from this
+  // (TUD, idle+2 > DAP) task, which would let a host time command PI-perturb DAP via the OLED bus hold.
   if (!strcmp(q, "time")) {
-    rtc_dt_t dt; char r[64];
-    if (rtc_pcf8563_read(&dt))
+    rec_snapshot_t s; char r[64];
+    if (dash_get_rec_snapshot(&s) && s.rtc_valid)
       snprintf(r, sizeof r, "{\"rtc\":1,\"valid\":1,\"t\":\"%04u-%02u-%02u %02u:%02u:%02u\"}\n",
-               (unsigned)dt.year, (unsigned)dt.mon, (unsigned)dt.day,
-               (unsigned)dt.hour, (unsigned)dt.min, (unsigned)dt.sec);
+               (unsigned)s.rtc.year, (unsigned)s.rtc.mon, (unsigned)s.rtc.day,
+               (unsigned)s.rtc.hour, (unsigned)s.rtc.min, (unsigned)s.rtc.sec);
     else
-      snprintf(r, sizeof r, "{\"rtc\":%d,\"valid\":0}\n", rtc_pcf8563_present() ? 1 : 0);
+      snprintf(r, sizeof r, "{\"rtc\":1,\"valid\":0}\n");
     reply(itf, r); return;
   }
   if (!strcmp(q, "settime")) {
@@ -256,7 +260,17 @@ static void handle_line(uint8_t itf, const char *line, int len) {
       reply(itf, "{\"err\":\"badtime\"}\n"); return;
     }
     rtc_dt_t dt = { (uint16_t)y, (uint8_t)mo, (uint8_t)d, (uint8_t)h, (uint8_t)mi, (uint8_t)s };
-    char r[24]; snprintf(r, sizeof r, "{\"set\":%d}\n", rtc_pcf8563_set(&dt) ? 1 : 0); reply(itf, r); return;
+    sd_settime_request(&dt);   // applied by the SD task (idle+0); confirm via a follow-up {"q":"time"}
+    reply(itf, "{\"set\":\"queued\"}\n"); return;
+  }
+  // M3 closeout HIL: feedback-layer readback — proves drive_feedback drove the buzzer/NeoPixel on events.
+  if (!strcmp(q, "fb")) {
+    uint32_t c = feedback_color();
+    char r[72];
+    snprintf(r, sizeof r, "{\"beeps\":%u,\"beeping\":%d,\"r\":%u,\"g\":%u,\"b\":%u}\n",
+             (unsigned)feedback_beep_count(), feedback_is_beeping() ? 1 : 0,
+             (unsigned)((c >> 8) & 0xFFu), (unsigned)((c >> 16) & 0xFFu), (unsigned)(c & 0xFFu));
+    reply(itf, r); return;
   }
 
   reply(itf, "{\"err\":\"unknown\"}\n");

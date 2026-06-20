@@ -415,7 +415,14 @@ void dashboard_task(void *ptr) {
         if (ok) {
             ssd1306_clear(&disp);
             SCREENS[idx](&ctx, &disp, &scr);
-            if (i2c1_bus_lock(200)) { ssd1306_show(&disp); i2c1_bus_unlock(); g_dash_shows++; }
+            // Tick the show-success counter ONLY when the panel ACKed the burst (ssd1306_show >= 0), not
+            // merely when the bus mutex was acquired — so a NAKing/absent OLED gives shows < loops (the
+            // genuine dark-panel detector, per the M3 closeout audit).
+            if (i2c1_bus_lock(200)) {
+                int w = ssd1306_show(&disp);
+                i2c1_bus_unlock();
+                if (w >= 0) g_dash_shows++;
+            }
         } else {
             SCREENS[idx](&ctx, &disp, &scr);   // still publish attestation even if the panel is absent
         }

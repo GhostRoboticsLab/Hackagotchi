@@ -9,10 +9,12 @@ auto-cycle work, an out-of-range jump is clamped (not a hardfault), and frames t
 
   ./screen_hil.py        # bar: all checks OK + "M3.1 SELF-ATTESTATION: PASS"
 
-NOTE: the OLED being physically lit is anchored once by an operator glance (self-attestation proves the
-data layer + that show() succeeded, not photons) — the panel is known-good since Gate 1.
+NOTE: g_dash_shows now ticks ONLY when ssd1306_show() returns a real panel ACK (>=0), so a NAKing/absent
+OLED gives shows<loops and FAILS this test — the counter is a genuine dark-panel detector. The residual
+operator glance covers only GRAPHICS correctness (the cat + sparkline are drawn but not text-attestable);
+the panel-lit + text-content layers are machine-proven here.
 """
-import sys, time, json
+import sys, time, json, re
 CTRL = "/dev/cu.usbmodem21204"
 import serial
 
@@ -51,8 +53,9 @@ def main():
     ctrl('{"q":"screen","n":2}'); time.sleep(0.5)
     sc2 = ctrl('{"q":"screen"}'); print("screen2:", sc2)
     chk(sc2.get("screen") == 2 and "RECORDER" in sc2.get("text", ""), "screen 2 = RECORDER")
-    rec = ctrl('{"q":"rec"}')
-    chk(rec.get("file", "X") in sc2.get("text", ""), "RECORDER shows the live snapshot filename")
+    rec = ctrl('{"q":"rec"}'); f = rec.get("file", "")
+    chk(bool(re.fullmatch(r"log_\d+\.txt", f)) and f in sc2.get("text", ""),
+        "RECORDER shows the live log_NNN.txt filename (non-empty, matches the snapshot)")
 
     for nm, n, key in [("THROUGHPUT", 3, "THROUGHPUT"), ("WATCHDOG", 4, "WATCHDOG"), ("CLOCK", 5, "CLOCK")]:
         ctrl('{"q":"screen","n":%d}' % n); time.sleep(0.5)
@@ -66,10 +69,12 @@ def main():
     chk(0 <= scC.get("screen", -1) < scC.get("n", 0), "out-of-range clamped (no hardfault)")
     chk(ctrl('{"q":"status"}').get("crashes", -1) == 0, "no crash from the clamp")
 
+    # auto-cycle is DASH_CYCLE_MS = 6 s; wait > one full cycle but < two, assert exactly one advance
     ctrl('{"q":"screen","n":0}'); time.sleep(0.5)
-    a = ctrl('{"q":"screen"}').get("screen"); time.sleep(6.0); b = ctrl('{"q":"screen"}').get("screen")
+    a = ctrl('{"q":"screen"}').get("screen"); time.sleep(7.5)
+    s_b = ctrl('{"q":"screen"}'); b = s_b.get("screen"); nscr = s_b.get("n", 6)
     print(f"auto-cycle {a} -> {b}")
-    chk(a == 0 and b != 0, "auto-cycle advances with no input (~5s)")
+    chk(a == 0 and b == (a + 1) % nscr, "auto-cycle advances exactly one screen (~6s, no input)")
 
     sc2 = ctrl('{"q":"screen"}')
     print(f"loops={sc2.get('loops')} shows={sc2.get('shows')} dstack={sc2.get('dstack')}")

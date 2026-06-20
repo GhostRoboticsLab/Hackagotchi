@@ -49,6 +49,10 @@ bool dash_get_rec_snapshot(rec_snapshot_t *out);
 // SD writes with no host UART traffic). Toggled over CDC1 ({"q":"recgen_on"}/{"q":"recgen_off"}).
 void sd_recgen_set(bool on);
 
+// {"q":"settime"}: latch a clock-set request applied by the SD task (idle+0), so the i2c1 RTC write is
+// never taken on the TUD task (above DAP). The new time appears in the next published snapshot.
+void sd_settime_request(const rtc_dt_t *t);
+
 // One-line JSON of the bring-up self-test result (for the CDC1 {"q":"sd"} reply).
 void sd_gate_status_json(char *out, unsigned outsz);
 

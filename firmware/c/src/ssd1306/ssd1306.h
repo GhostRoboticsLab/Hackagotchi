@@ -131,9 +131,11 @@ void ssd1306_invert(ssd1306_t *p, uint8_t inv);
 	@brief display buffer, should be called on change
 
 	@param[in] p : instance of display
+	@returns the I2C result of the framebuffer burst: >=0 bytes written (panel ACKed), <0 PICO_ERROR_*
+	         (NAK/timeout) — [HACKAGOTCHI] lets the dashboard prove a real flush vs a dead panel.
 
 */
-void ssd1306_show(ssd1306_t *p);
+int ssd1306_show(ssd1306_t *p);
 
 /**
 	@brief clear display buffer
