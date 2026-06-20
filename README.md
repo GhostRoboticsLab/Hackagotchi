@@ -261,3 +261,23 @@ Demo Mode is a comprehensive visual demonstration designed to show off all of th
     *   **Screen 6/7 (Menus)**: Animates the selection cursor cycling through options to demonstrate navigation.
     *   **Screen 8 (Demo Trigger)**: Cycles the selection highlight between trigger commands.
 *   **Interaction**: Pressing the physical button (short or long press) at any point during the demo **instantly exits** Demo Mode and resets the device.
+
+---
+
+## 📜 License
+
+Hackagotchi is **open source**.
+
+* The project's own code is licensed **[GPL-3.0-or-later](LICENSE)** — the same license as
+  its lineage (Pwnagotchi, Flipper Zero, Meshtastic). You may use, study, modify, and
+  redistribute it; derivatives and commercial forks must also be GPL-3.0 (a copyleft
+  "leash" against closed clones).
+* **Exception:** the v2 `firmware/c/` subtree is a fork of Raspberry Pi's MIT-licensed
+  [`debugprobe`](https://github.com/raspberrypi/debugprobe) and is kept under
+  **[MIT](firmware/c/LICENSE)** so fixes stay upstream-compatible.
+* Bundled and build-time third-party components remain under their own permissive
+  licenses (MIT / BSD-3-Clause / Apache-2.0) — see **[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)**.
+
+**Open-core model:** the firmware is free and forkable; the project is sustained by selling
+assembled, pre-flashed units, the 3D-printed enclosure, the v2 SWD-recovery tier, and the
+"Hackagotchi" brand — not by closing the code.
