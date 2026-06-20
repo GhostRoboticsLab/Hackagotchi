@@ -16,3 +16,6 @@ tests/gates/fixtures/src/
 
 # clangd / editor index
 .cache/
+
+# M1 HIL run evidence (regenerated on hardware; keep scripts, not run artifacts)
+tests/m1/logs/

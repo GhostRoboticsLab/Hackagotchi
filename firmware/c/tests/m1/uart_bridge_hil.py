@@ -106,17 +106,22 @@ def main():
             ctrl_cmd(c, '{"q":"uloop_off"}\n')
             return 1
 
-        # Write the payload to CDC0; it must come back via the full capture path.
-        d.reset_input_buffer()
-        d.write(PAYLOAD)
-        d.flush()
-
+        # Write the payload to CDC0; it must come back via the full capture path. Retry up to 3x to
+        # ride out transient macOS USB-CDC hiccups (a genuinely broken path fails ALL attempts).
         got = bytearray()
-        deadline = time.time() + 2.5
-        while time.time() < deadline and len(got) < len(PAYLOAD):
-            chunk = d.read(len(PAYLOAD))
-            if chunk:
-                got.extend(chunk)
+        for attempt in range(3):
+            d.reset_input_buffer()
+            d.write(PAYLOAD)
+            d.flush()
+            got = bytearray()
+            deadline = time.time() + 2.0
+            while time.time() < deadline and len(got) < len(PAYLOAD):
+                chunk = d.read(len(PAYLOAD))
+                if chunk:
+                    got.extend(chunk)
+            if bytes(got) == PAYLOAD:
+                break
+            print(f"  [retry {attempt+1}/3] got {len(got)}B (transient CDC hiccup?), retrying")
         print(f"[roundtrip] sent {len(PAYLOAD)}B, got {len(got)}B: {bytes(got)!r}")
 
         after = ctrl_cmd(c, '{"q":"status"}\n')

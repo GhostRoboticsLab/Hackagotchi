@@ -139,13 +139,17 @@ void usb_thread(void *ptr)
     TickType_t wake;
     wake = xTaskGetTickCount();
     do {
-        // [HACKAGOTCHI] M1: SW-watchdog heartbeat. g_tud_wedge is a HIL hook — when set, this task
-        // deliberately stops looping so the watchdog can be proven to catch a wedged TUD task.
+        // [HACKAGOTCHI] M1: SW-watchdog HIL hook — when set, this task deliberately stops looping so
+        // the watchdog can be proven to catch a wedged TUD task.
         if (g_tud_wedge)
             for (;;) tight_loop_contents();
-        g_tud_checkin++;
 
         tud_task();
+        // Heartbeat AFTER tud_task() so it proves tud_task() RETURNED this iteration (a hang inside
+        // tud_task stops the heartbeat -> watchdog fires). NB: this proves the usb_thread LOOP +
+        // tud_task() liveness, not USB-stack health — the upstream dev_mon task (SOF watchdog) covers
+        // a logically-stalled-but-returning USB stack via tud_deinit/tud_init. The two are complementary.
+        g_tud_checkin++;
 #ifdef PROBE_USB_CONNECTED_LED
         if (!gpio_get(PROBE_USB_CONNECTED_LED) && tud_ready())
             gpio_put(PROBE_USB_CONNECTED_LED, 1);

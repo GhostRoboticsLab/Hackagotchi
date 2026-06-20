@@ -21,8 +21,14 @@ TaskHandle_t watchdog_taskhandle;
 // (tests/m1/M1_RESULTS.md, increment 5) to not false-fire under sustained DAP + USB load.
 static volatile bool s_armed = true;
 
-void wd_arm(void)      { s_armed = true; }
-bool wd_is_armed(void) { return s_armed; }
+// Worst-case observed TUD stall (peak since_ms, 500 ms granularity). Stays 0 while TUD advances within
+// every sample window; exposed in status so the soak can assert a MEASURED margin to WD_TUD_STALL_MS,
+// not merely "didn't reboot". A climbing value = TUD approaching the stall threshold.
+static volatile uint32_t s_max_gap_ms = 0;
+
+void wd_arm(void)         { s_armed = true; }
+bool wd_is_armed(void)    { return s_armed; }
+uint32_t wd_max_gap_ms(void) { return s_max_gap_ms; }
 
 void watchdog_task(void *ptr) {
     (void)ptr;
@@ -50,6 +56,7 @@ void watchdog_task(void *ptr) {
             } else {
                 since_ms += WD_FEED_MS;
             }
+            if (since_ms > s_max_gap_ms) s_max_gap_ms = since_ms;  // measured worst-case margin
 
             if (since_ms >= WD_TUD_STALL_MS)
                 crash_box_record_watchdog("TUD");  // records the reason, then reboots — no return

@@ -116,9 +116,13 @@ def main():
 
         base = status(c)
         up0, cr0, armed = field_int(base, "up"), field_int(base, "crashes"), field_int(base, "wd_armed")
+        gap0 = field_int(base, "wd_gap")
         print(f"[baseline] {base}")
         if armed != 1:
             print("FAIL: watchdog is not armed by default (wd_armed != 1)")
+            return 1
+        if gap0 is None:
+            print("FAIL: status has no wd_gap field — wrong/old firmware")
             return 1
         last_up = up0
 
@@ -155,10 +159,13 @@ def main():
         t.join(timeout=65)
         final = status(c)
         up1, cr1 = field_int(final, "up"), field_int(final, "crashes")
+        gap1 = field_int(final, "wd_gap")
         c.write(b'{"q":"uloop_off"}\n')
         c.flush()
         print(f"[final] {final}")
 
+    # WD_TUD_STALL_MS is 4000; a healthy margin keeps the worst-case observed gap well under half that.
+    GAP_CEIL = 2000
     # verdict
     if fired:
         return 1
@@ -171,9 +178,14 @@ def main():
     if up1 is None or up0 is None or up1 < up0:
         print(f"FAIL: up not monotonic ({up0}->{up1}) — probe rebooted")
         return 1
+    if gap1 is None or gap1 >= GAP_CEIL:
+        print(f"FAIL: worst-case TUD stall margin wd_gap={gap1}ms reached/exceeded {GAP_CEIL}ms "
+              f"(threshold 4000ms) — TUD approached the stall window under load")
+        return 1
     print(f"\nPASS: armed watchdog did NOT false-fire under load "
           f"({flash['ok']} flashes [{flash['fail']} failed] + {fh_bytes//1024}KB CDC firehose; "
-          f"up {up0}->{up1} monotonic, crashes steady at {cr1})")
+          f"up {up0}->{up1} monotonic, crashes steady at {cr1}; "
+          f"MEASURED worst-case TUD stall margin wd_gap {gap0}->{gap1}ms << 4000ms threshold)")
     return 0
 
 

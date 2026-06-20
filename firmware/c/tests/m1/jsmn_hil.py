@@ -41,8 +41,8 @@ def find_port(timeout=25):
     return None
 
 
-def page_of(reply):
-    tok = '"page":'
+def field_int(reply, key):
+    tok = f'"{key}":'
     i = reply.find(tok)
     if i < 0:
         return None
@@ -54,6 +54,10 @@ def page_of(reply):
         return int(reply[j:k])
     except ValueError:
         return None
+
+
+def page_of(reply):
+    return field_int(reply, "page")
 
 
 def main():
@@ -110,7 +114,10 @@ def main():
         check("badjson", q("not json at all\n"), must_have='"err":"badjson"', must_not="Hackagotchi")
         check("unknown cmd", q('{"q":"florp"}\n'), must_have='"err":"unknown"')
 
-        # 4. fragmentation — split a status request across two writes (newline only in the 2nd)
+        # 4. fragmentation — split a request across two writes (newline only in the 2nd). Prove the
+        #    line buffer actually REASSEMBLED it (not host-coalesced) via the device-side `frag` counter,
+        #    which increments only when a callback ends holding a partial line.
+        frag0 = field_int(q('{"q":"status"}\n'), "frag")
         s.reset_input_buffer()
         s.write(b'{"q":"sta')
         s.flush()
@@ -120,6 +127,12 @@ def main():
         time.sleep(0.5)
         frag = s.read(500).decode(errors="replace").strip()
         check("fragmented request reassembled", frag, must_have='"fw":"Hackagotchi"')
+        frag1 = field_int(frag, "frag")
+        ok_frag = frag0 is not None and frag1 is not None and frag1 > frag0
+        print(f"  [{'PASS' if ok_frag else 'FAIL'}] frag counter advanced {frag0}->{frag1} "
+              f"(reassembly path provably ran)")
+        if not ok_frag:
+            fails.append("frag counter did not advance — reassembly not exercised")
 
     if fails:
         print("\nFAIL:", fails)

@@ -121,11 +121,31 @@ def main():
         print(f"FAIL: crash count did not advance by 1 ({crashes0} -> {crashes1})")
         ok = False
 
-    if ok:
-        print(f"\nPASS: HardFault captured (PC={pc}), survived reboot, count {crashes0}->{crashes1}, "
-              f"probe re-enumerated on {port2}")
-        return 0
-    return 1
+    if not ok:
+        return 1
+    print(f"[hardfault] PASS: PC={pc}, survived reboot, count {crashes0}->{crashes1}")
+
+    # --- second fault path: force a malloc failure (proves the FreeRTOS malloc hook -> crash box) ---
+    print("\n[oom] sending {\"q\":\"oom_test\"} -> exhaust FreeRTOS heap -> mallocfail hook + reboot ...")
+    query(port2, '{"q":"oom_test"}\n', wait=0.4)
+    time.sleep(2.0)
+    port3, status3 = find_control_port(timeout=30)
+    if not port3:
+        print("FAIL: probe did not re-enumerate after the OOM fault")
+        return 1
+    last_oom = query(port3, '{"q":"lastfault"}\n')
+    crashes2 = field_int(status3, "crashes")
+    print(f"[oom] lastfault: {last_oom}")
+    if '"kind":"mallocfail"' not in last_oom:
+        print("FAIL: OOM did not record kind=mallocfail (malloc hook -> crash box path broken)")
+        return 1
+    if crashes2 is None or crashes2 != crashes1 + 1:
+        print(f"FAIL: crash count did not advance for the OOM fault ({crashes1} -> {crashes2})")
+        return 1
+
+    print(f"\nPASS: HardFault (PC={pc}) AND mallocfail both captured + survived reboot "
+          f"(count {crashes0}->{crashes1}->{crashes2}); probe re-enumerated")
+    return 0
 
 
 if __name__ == "__main__":
