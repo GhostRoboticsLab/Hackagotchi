@@ -30,7 +30,9 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
   round-trip 100/100; node mapping stable across 3 replug + 1 reboot.
 
 ## After gates pass — build the firmware (engineering-plan M1–M5)
-- [~] **M1 probe + bridge + CDC1 control + reliability core** — IN PROGRESS (`tests/m1/M1_RESULTS.md`).
+- [x] **M1 probe + bridge + CDC1 control + reliability core** — **COMPLETE / PASS** *(2026-06-20)*,
+  HIL-verified end-to-end (`tests/m1/M1_RESULTS.md` OVERALL). Conventions codified in
+  `docs/firmware-conventions.md`. Cleared to start M2.
   - [x] **Crash box** (fault handler/crash-box + stack/malloc hooks routed to it) — **PASS, HIL-verified**
     *(2026-06-20)*: `isr_hardfault` overlay captures the M0+ exception frame to `.uninitialized_data`
     (survives the watchdog reboot — verified outside the bss clear), surfaced via CDC1 `{"q":"lastfault"}`;
@@ -51,9 +53,10 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     `src/uart_bridge.c`), replacing the polling-into-32B that lost bytes between polls. Host unit test
     `tests/m1/ring_test.c` (6/6); HIL `tests/m1/uart_bridge_hil.py` round-trips via PL011 internal
     loopback (no jumper), 0 drops. Telemetry `urx_drop`/`urx_hw`/`utx_drop` in status.
-  - [ ] per-interface USB string descriptors (stable CDC0=UART / CDC1=Control naming); error-code+goto-cleanup idiom.
-  - [ ] Watchdog hardening: characterise DAP/UART/DASH cadence under flash load → monitor them +
-    flip the watchdog to armed-by-default.
+  - [x] per-interface USB string descriptors (already wired in Gate-2; verified) + non-blocking host→target
+    TX (replaced uart_write_blocking) + error-code/goto-cleanup idiom codified (`docs/firmware-conventions.md`). *(2026-06-20)*
+  - [x] **Watchdog armed-by-default** *(2026-06-20)*: monitors TUD (DAP can't starve it); proven to FIRE on a
+    real wedge (`watchdog_hil.py`) and NOT false-fire under 25-flash DAP soak (`watchdog_soak.py`).
 - [ ] M2 SD + black-box logging (carlk3 FatFs, low-prio writer); RTC timestamps.
 - [ ] M3 core screens; M4 full UI parity; M5 polish + tagged release (.uf2 + .elf).
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,

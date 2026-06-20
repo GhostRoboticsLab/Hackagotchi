@@ -15,7 +15,11 @@
 
 TaskHandle_t watchdog_taskhandle;
 
-static volatile bool s_armed = false;
+// ARMED BY DEFAULT (the shipping posture — the probe must never sit silently wedged). Safe because we
+// monitor the TUD task (prio +2), which is high-priority and always servicing USB: DAP (prio +1) is
+// LOWER, so flash load can never starve TUD, and TUD goes silent only on a true wedge. Soak-proven
+// (tests/m1/M1_RESULTS.md, increment 5) to not false-fire under sustained DAP + USB load.
+static volatile bool s_armed = true;
 
 void wd_arm(void)      { s_armed = true; }
 bool wd_is_armed(void) { return s_armed; }

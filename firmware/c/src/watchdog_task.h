@@ -12,8 +12,10 @@
  * TUD task is high-priority and always loops; its silence means a true wedge. (DAP/UART/DASH
  * check-ins can be added once each task's cadence under load is characterised.)
  *
- * SAFETY: disarmed by default — the HW WDT is not even enabled until wd_arm() is called over CDC1.
- * A freshly flashed image therefore cannot reboot-loop; arming is an explicit, observable action.
+ * ARMED BY DEFAULT (shipping posture: a debug probe must never sit silently wedged). This is safe
+ * because we monitor TUD (prio +2): DAP (prio +1) is lower, so flash load can never starve TUD, and
+ * TUD goes silent only on a real wedge — so arm-by-default cannot false-fire under load (soak-proven).
+ * The HW WDT (8 s) backstops the watchdog task itself dying. wd_arm() remains as an idempotent re-arm.
  */
 #ifndef HACKAGOTCHI_WATCHDOG_TASK_H
 #define HACKAGOTCHI_WATCHDOG_TASK_H
@@ -30,7 +32,8 @@ extern TaskHandle_t watchdog_taskhandle;
 extern volatile uint32_t g_tud_checkin;  // bumped every usb_thread loop — the watchdog's heartbeat
 extern volatile bool     g_tud_wedge;    // HIL: set -> usb_thread self-wedges so the watchdog fires
 
-// Arm enforcement (enables the HW WDT + stall->reboot). One-way for the session; default disarmed.
+// Idempotent re-arm (enables the HW WDT + stall->reboot). Armed by default; there is no software
+// disarm — only a reboot returns to the (also-armed) default.
 void wd_arm(void);
 bool wd_is_armed(void);
 
