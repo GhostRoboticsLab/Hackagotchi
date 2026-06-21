@@ -1,3 +1,5 @@
+; SPDX-License-Identifier: BSD-3-Clause
+; Copyright (c) 2020 Raspberry Pi (Trading) Ltd.  (vendored from raspberrypi/pico-examples)
 ;
 ; WS2812 (NeoPixel) PIO driver — vendored from raspberrypi/pico-examples (BSD-3-Clause).
 ; The XIAO RP2040 has one onboard WS2812 on GP12 (data), powered by GP11 (drive HIGH to enable).

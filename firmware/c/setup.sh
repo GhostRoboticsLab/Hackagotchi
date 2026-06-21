@@ -44,12 +44,13 @@ if [ -n "${PICO_SDK_PATH:-}" ] && [ -d "${PICO_SDK_PATH}" ]; then
   echo "[setup] using PICO_SDK_PATH=$PICO_SDK_PATH"
 else
   SDK_DIR="$UPSTREAM/pico-sdk"
+  SDK_TAG="2.2.0"                     # pinned: matches the runner cache + THIRD-PARTY-NOTICES + CMake (>=2)
   if [ ! -d "$SDK_DIR/.git" ]; then
-    echo "[setup] PICO_SDK_PATH not set — cloning pico-sdk into $SDK_DIR (this is large)..."
-    git clone --recurse-submodules https://github.com/raspberrypi/pico-sdk.git "$SDK_DIR"
+    echo "[setup] PICO_SDK_PATH not set — cloning pico-sdk @ $SDK_TAG into $SDK_DIR (this is large)..."
+    git clone --branch "$SDK_TAG" --depth 1 --recurse-submodules https://github.com/raspberrypi/pico-sdk.git "$SDK_DIR"
   fi
   export PICO_SDK_PATH="$SDK_DIR"
-  echo "[setup] PICO_SDK_PATH=$PICO_SDK_PATH"
+  echo "[setup] PICO_SDK_PATH=$PICO_SDK_PATH (pinned $SDK_TAG)"
 fi
 
 if [ "${1:-}" = "--build-stock" ]; then
