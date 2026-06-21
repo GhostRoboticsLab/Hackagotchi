@@ -105,16 +105,33 @@ static void aline(dash_screen_t *s, const char *fmt, ...) {  // record an attest
     s->nlines++;
 }
 
-// M-UI-2: the persistent status bar. The existing title row IS the bar — title text on the left,
-// global status glyphs blitted on the right (REC when logging, SD when mounted; the ghost vitals pip
-// is added in M-UI-3). Nothing in the body moves. The bar's state is ALSO emitted as a text line
-// ("BAR ...") so the cameraless HIL can verify the glyphs are honest (drawn == attested).
+// M-UI-3: "Spectre" — the ghost IS the target board's soul. Its state is a literal readout of the
+// recorder snapshot (all R1-safe in-snapshot fields; no cross-task reads). Precedence: no target ->
+// absent; target silent (wedged) -> pale; recorder can't archive it (SD fault) -> glitch; else alive.
+enum { GH_ABSENT = 0, GH_LIVE, GH_PALE, GH_GLITCH };
+static int ghost_state(const dash_ctx_t *c) {
+    if (c->snap.rx_total == 0) return GH_ABSENT;
+    if (c->snap.wedge)         return GH_PALE;
+    if (c->snap.last_err != 0) return GH_GLITCH;
+    return GH_LIVE;
+}
+static const char *ghost_name(int g) {
+    return g == GH_LIVE ? "live" : g == GH_PALE ? "pale" : g == GH_GLITCH ? "glitch" : "absent";
+}
+
+// M-UI-2/3: the persistent status bar. The existing title row IS the bar — title text on the left,
+// global status glyphs blitted on the right: REC when logging, SD when mounted, and the ghost vitals
+// PIP in the corner whenever a target has spoken (it blinks while pale/glitch). Nothing in the body
+// moves. The bar's state — including the ghost token g:<state> — is ALSO emitted as a compact text
+// line ("BAR ...", <=21 cols) so the cameraless HIL can verify the glyphs are honest.
 static void statusbar(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
+    int g = ghost_state(c);
     if (c->snap.logging)    ssd1306_blit(d, glyph_rec, glyph_rec_W, glyph_rec_H, 100, 0, SSD1306_BLIT_OR);
     if (c->snap.sd_mounted) ssd1306_blit(d, glyph_sd,  glyph_sd_W,  glyph_sd_H,  110, 0, SSD1306_BLIT_OR);
-    aline(s, "BAR %s%sup=%lu heap=%uK",
-          c->snap.logging ? "REC " : "", c->snap.sd_mounted ? "SD " : "",
-          (unsigned long)c->up_s, (unsigned)(c->heap / 1024u));
+    if (g != GH_ABSENT && !((g == GH_PALE || g == GH_GLITCH) && (c->frame / 3u) % 2u == 0))
+        ssd1306_blit(d, ghost_pip, ghost_pip_W, ghost_pip_H, 119, 0, SSD1306_BLIT_OR);
+    aline(s, "BAR %c%c g:%s u%lu", c->snap.logging ? 'R' : '-', c->snap.sd_mounted ? 'S' : '-',
+          ghost_name(g), (unsigned long)c->up_s);
 }
 
 static void hdr(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s, const char *title) {  // status bar + title @y0, divider @y9
@@ -237,6 +254,17 @@ static void draw_cat(ssd1306_t *d, bool active, uint32_t tick, const char *last_
     }
 }
 
+// M-UI-3: blit the 16x16 ghost in its current vitals state at (x,y). Absent target -> nothing drawn.
+// Glitch flickers (urgent/transient); live + pale are steady (the hollow pale shape already reads as
+// "in trouble"). Pure OR-blit over a dark gutter; the eye-voids are baked into the sprites as off-pixels.
+static void draw_ghost_vitals(const dash_ctx_t *c, ssd1306_t *d, int x, int y) {
+    int g = ghost_state(c);
+    if (g == GH_ABSENT) return;
+    if (g == GH_GLITCH && (c->frame / 2u) % 2u == 0) return;   // tear flicker
+    const uint8_t *spr = (g == GH_PALE) ? ghost_pale : (g == GH_GLITCH) ? ghost_glitch : ghost_live;
+    ssd1306_blit(d, spr, ghost_live_W, ghost_live_H, x, y, SSD1306_BLIT_OR);   // all three are 16x16
+}
+
 // ---------------- screens ----------------
 
 // 0 — HOME / mascot: brand + bridge/recorder stats (left) + the cat (right).
@@ -251,6 +279,7 @@ static void screen_home(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     ssd1306_draw_string(d, 4, 32, 1, c->snap.logging ? "REC" : "off");
     if (c->snap.alert[0]) { ssd1306_draw_string(d, 28, 32, 1, "!"); }
     draw_cat(d, c->active, c->frame, "RX");
+    draw_ghost_vitals(c, d, 4, 46);   // M-UI-3: Spectre, bottom-left — paired diagonally with the cat
     // attestation summary
     aline(s, "rx %s", rx); aline(s, "up %s", up);
     aline(s, "%s%s", c->snap.logging ? "REC" : "off", c->snap.alert[0] ? " !" : "");

@@ -92,6 +92,7 @@ def main():
         ctrl('{"q":"screen","n":%d}' % n); time.sleep(0.35)
         txt = ctrl('{"q":"screen"}').get("text", "")
         chk("BAR" in txt, f"screen {n}: status bar attests (BAR token present)")
+        chk("g:" in txt, f"screen {n}: ghost vitals attest (g:<state> token present)")  # M-UI-3
         chk(txt.count("\n") + 1 <= DASH_MAX_LINES + 1, f"screen {n}: attestation within cap (no silent drop)")
 
     sc2 = ctrl('{"q":"screen"}')
