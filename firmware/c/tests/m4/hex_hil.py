@@ -62,7 +62,11 @@ def main():
     txt = hs.get("text", "")
     chk("HEX SNIFFER" in txt, "hex mode title = HEX SNIFFER")
     chk("48 45 58" in txt, "hex view shows the marker bytes (48 45 58 = 'HEX')")
-    chk("HEXMO" in txt, "ASCII gutter shows the bytes too (HEXMO)")
+    # The ASCII gutter is the text after the 15-col hex field on each row; the 5-bytes/row wrap can split
+    # the marker across rows (e.g. ".HEXM"|"ODE42" when a stray RX byte shifts alignment), so rejoin the
+    # gutters across rows before checking — the hex bytes above already prove the render is correct.
+    gutter = "".join(row[15:] for row in txt.split("|")[1:])
+    chk("HEXMODE42" in gutter, "ASCII gutter (rejoined across rows) shows the marker")
 
     b = ctrl(c, '{"q":"hex"}'); print("hex toggle back:", b)
     chk(b.get("hex") == 0, '{"q":"hex"} -> hex:0 (back to ASCII)')

@@ -94,12 +94,18 @@ def main():
               must_have='"fw":"Hackagotchi"')
         check("dump has fault", q('{"q":"dump"}\n', wait=0.6), must_have='"fault"')
 
-        # next/prev move the page index
+        # next/prev move the page index. Pin to screen 0 first: avoids the wrap boundary (next from the
+        # last screen wraps to 0) and resets the auto-cycle timer so a 6 s tick can't move the page
+        # mid-check (the firmware owns the index; this just makes the assertion deterministic).
+        q('{"q":"screen","n":0}\n'); time.sleep(0.3)
         base = page_of(q('{"q":"status"}\n'))
-        r_next = q('{"q":"next"}\n')
-        r_prev = q('{"q":"prev"}\n')
-        pn, pp = page_of(r_next), page_of(r_prev)
-        ok_nav = base is not None and pn == base + 1 and pp == base
+        # nav is ASYNC: CDC1 posts an intent the dashboard applies on its next loop, so the nav command's
+        # own reply still shows the PRE-nav page. Read the page from a fresh status AFTER a short settle.
+        q('{"q":"next"}\n'); time.sleep(0.3)
+        pn = page_of(q('{"q":"status"}\n'))
+        q('{"q":"prev"}\n'); time.sleep(0.3)
+        pp = page_of(q('{"q":"status"}\n'))
+        ok_nav = base == 0 and pn == 1 and pp == 0
         print(f"  [{'PASS' if ok_nav else 'FAIL'}] next/prev page nav: base={base} next={pn} prev={pp}")
         if not ok_nav:
             fails.append("next/prev nav")
