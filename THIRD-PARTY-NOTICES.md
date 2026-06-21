@@ -1,5 +1,7 @@
 # Third-party notices
 
+Copyright © 2026 GhostRoboticsLab and the Hackagotchi authors.
+
 Hackagotchi's own source code is licensed **GPL-3.0-or-later** (see [`LICENSE`](LICENSE)),
 **except** the `firmware/c/` subtree, which is **MIT** (see
 [`firmware/c/LICENSE`](firmware/c/LICENSE) and the note below). Bundled and build-time
@@ -12,7 +14,6 @@ Vendored MicroPython drivers, redistributed under their original **MIT** license
 | Component | Path | License | Upstream |
 |---|---|---|---|
 | `ssd1306.py` | `firmware/micropython/lib/ssd1306.py` | MIT | MicroPython project (`micropython/micropython`) |
-| `sdcard.py`  | `firmware/micropython/lib/sdcard.py` *(to be vendored)* | MIT | `micropython/micropython-lib` |
 
 MIT is one-way compatible with GPL-3.0, so the combined v1 firmware (GPL-3.0 application
 code + MIT drivers) is distributable as a whole under **GPL-3.0-or-later**.

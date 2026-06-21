@@ -78,11 +78,25 @@ jobs:
         run: |
           set -euo pipefail
           tag="fw-c-v${{ inputs.version }}"
+          # Release notes: extract this version's section from CHANGELOG.md if present, else a default.
+          notes="$(mktemp)"
+          if awk -v v="${{ inputs.version }}" '
+                $0 ~ "^## \\[?"v"\\]?([^0-9]|$)" {grab=1; next}
+                grab && /^## / {exit}
+                grab {print}
+              ' CHANGELOG.md > "$notes" 2>/dev/null && [ -s "$notes" ]; then
+            echo "(release notes sourced from CHANGELOG.md)"
+          else
+            echo "debugprobe-v2.2.3 fork: CMSIS-DAP probe + UART bridge + JSON-control CDC + SD black-box recorder + OLED dashboard. Static-analysis gate green; HIL gates attested on the release image (see docs/release-readiness.md)." > "$notes"
+          fi
+          # Attach the binaries + the attribution docs the NOTICE requires shipping with the image.
           gh release create "$tag" \
             --title "Hackagotchi probe firmware (C) v${{ inputs.version }}" \
-            --notes "debugprobe-v2.2.3 fork. DAP + UART bridge + JSON-control CDC. Static-analysis gate green." \
+            --notes-file "$notes" \
             firmware/c/build/hackagotchi_probe.uf2 \
-            firmware/c/build/hackagotchi_probe.elf
+            firmware/c/build/hackagotchi_probe.elf \
+            firmware/c/THIRD-PARTY-NOTICES.md \
+            firmware/c/LICENSE
 
   # TODO (after M1 introduces portable logic): a host-tests job (Ceedling/Unity) for the UART ring
   # buffer, wedge-detector state machine, JSON control parser, and log-rotation — runs with no probe.
