@@ -16,15 +16,16 @@ camera-free text-attestation model.
   (`tools/spr_gen.py` → `sprites.gen.h`). Sprites are flash-resident (~0 RAM).
 - **Persistent status bar** on every screen (REC / SD glyphs + a ghost pip), attested as a `BAR …`
   line; `DASH_MAX_LINES` 6→8 so a new token can never silently drop a literal fact. New `hud_gauge_h()`.
-- **Spectre, the ghost** — its state *is* the target board's soul: absent / live / pale (wedged) /
-  glitch (SD fault) / exorcised, bound to the recorder snapshot, attested `g:<state>`.
+- **Spectre, the ghost** — its state *is* the target board's soul: dozing (quiet) / live (talking) /
+  pale (wedged) / glitch (SD fault) / exorcised, from recent UART liveness, attested `g:<state>`.
 - **Cat moods** — sleep / content / hunting / alert from existing signals, attested `cat:<mood>`;
   flying-data particle speed scales with live throughput.
 - **Resurrection tally** — wedge→recover + fault counts, edge-counted in the 50 Hz SD task (not the
   4 Hz render loop, which could miss a fast edge) and shown on UPTIME.
 - **Companion interaction over CDC1** (no physical button): `pet`, `summon`/`banish`, `exorcise`
   (a host flasher fires it after a clean reflash), `ghost` (mute → pure-instrument cluster), `theme`
-  (motion density); plus a ghostly dither screen-wipe between screens.
+  (motion density). An optional dither screen-wipe between screens is available behind `-DHG_SCREEN_WIPE`
+  (off by default — at 4 Hz a single full-frame XOR reads as a glitch, not a smooth transition).
 
 Footprint: text +3.3 KB, bss +164 B total. Static-analysis gate green; the blit host unit test and an
 extended `screen_hil.py` attest the new surfaces.

@@ -99,9 +99,9 @@ def main():
     # needed), so the override is HIL-provable; pet / theme / ghost-mute are acknowledged.
     ctrl('{"q":"screen","n":0}'); time.sleep(0.3)
     ctrl('{"q":"banish"}'); time.sleep(0.4)
-    chk("g:absent" in ctrl('{"q":"screen"}').get("text", ""), "banish -> g:absent")
+    chk("g:off" in ctrl('{"q":"screen"}').get("text", ""), "banish -> g:off (ghost hidden)")
     ctrl('{"q":"summon"}'); time.sleep(0.4)
-    chk("g:absent" not in ctrl('{"q":"screen"}').get("text", ""), "summon -> ghost present")
+    chk("g:live" in ctrl('{"q":"screen"}').get("text", ""), "summon -> g:live (forced present)")
     ctrl('{"q":"ghost"}'); time.sleep(0.3)   # clear override -> AUTO
     chk(ctrl('{"q":"pet"}').get("pet") == 1, "pet acknowledged")
     chk(ctrl('{"q":"theme","n":0}').get("theme") == 0, "theme calm set")

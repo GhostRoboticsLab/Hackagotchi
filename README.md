@@ -111,9 +111,9 @@ HOME         SNIFFER        RECORDER     THROUGHPUT    WATCHDOG       UPTIME
 Two characters, and **every flicker of personality is a literal readout of a real signal**:
 
 - **The cat** is your bench familiar. Its mood is the bench at a glance — **sleeping** (idle), **content** (target chatting), **hunting** (data really flowing; particles + tail speed up with throughput), **alert** (target wedged or SD fault). Pet it with `{"q":"pet"}`.
-- **Spectre, the ghost**, *is the target board's soul* — **absent** (no target), **solid** (alive), **hollow/pale** (wedged), **torn** (recorder fault), and **exorcised** (dissolves when the host reflashes). A status pip rides the top-right corner of every screen.
+- **Spectre, the ghost**, *is the target board's soul* — it **dozes** when the target is quiet and **wakes solid** when it talks over the UART tap (GP0/GP1), goes **hollow/pale** when it wedges, **torn** on a recorder fault, and is **exorcised** (dissolves) when the host reflashes. A status pip rides the top-right corner of every screen. (Ghost liveness follows the target's *serial* — an SWD-only attach with no UART traffic shows the dozing ghost.)
 
-The six **monitor** screens auto-cycle (a ghostly dither wipe between them); three **tool** screens (MACRO / BAUD / SD-EXPLORER) are summoned over CDC1 and stay put. The buzzer + NeoPixel add event feedback (summon chirp, wedge alarm + red, recovery gasp + green) — all driven off the DAP hot path. Prefer a pure instrument cluster? `{"q":"ghost","on":0}`.
+The six **monitor** screens auto-cycle; three **tool** screens (MACRO / BAUD / SD-EXPLORER) are summoned over CDC1 and stay put. The buzzer + NeoPixel add event feedback (summon chirp, wedge alarm + red, recovery gasp + green) — all driven off the DAP hot path. Prefer a pure instrument cluster? `{"q":"ghost","on":0}`.
 
 </details>
 

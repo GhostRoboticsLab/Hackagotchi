@@ -127,18 +127,22 @@ static void aline(dash_screen_t *s, const char *fmt, ...) {  // record an attest
 // M-UI-3: "Spectre" — the ghost IS the target board's soul. Its state is a literal readout of the
 // recorder snapshot (all R1-safe in-snapshot fields; no cross-task reads). Precedence: no target ->
 // absent; target silent (wedged) -> pale; recorder can't archive it (SD fault) -> glitch; else alive.
-enum { GH_ABSENT = 0, GH_LIVE, GH_PALE, GH_GLITCH };
+// GH_OFF = banished/hidden. GH_DOZE = no target yet: the ghost is present but dozing (so the companion is
+// always visible at the bench, not just when a board is plugged in). The rest are the target's soul.
+enum { GH_OFF = 0, GH_DOZE, GH_LIVE, GH_PALE, GH_GLITCH };
 static int ghost_state(const dash_ctx_t *c) {
     int f = __atomic_load_n(&s_ghost_force, __ATOMIC_RELAXED);   // M-UI-5: summon/banish override
-    if (f == 0) return GH_ABSENT;                                                 // banished
+    if (f == 0) return GH_OFF;                                                    // banished
     if (f == 1) return c->snap.wedge ? GH_PALE : c->snap.last_err ? GH_GLITCH : GH_LIVE;  // summoned (real sub-state)
-    if (c->snap.rx_total == 0) return GH_ABSENT;                                  // auto, from the target's soul:
-    if (c->snap.wedge)         return GH_PALE;
-    if (c->snap.last_err != 0) return GH_GLITCH;
-    return GH_LIVE;
+    // auto, from the target's soul — RECENT liveness (like the cat), so the ghost wakes when the target
+    // talks and dozes when it goes quiet, instead of latching "live" forever after the first byte:
+    if (c->snap.wedge)         return GH_PALE;     // went silent + wedge detected (the alarm state)
+    if (c->snap.last_err != 0) return GH_GLITCH;   // recorder can't archive it (SD fault)
+    if (c->active)             return GH_LIVE;     // talking right now (rx within ~2.5 s)
+    return GH_DOZE;                                 // attached but quiet / no target yet
 }
 static const char *ghost_name(int g) {
-    return g == GH_LIVE ? "live" : g == GH_PALE ? "pale" : g == GH_GLITCH ? "glitch" : "absent";
+    return g == GH_LIVE ? "live" : g == GH_PALE ? "pale" : g == GH_GLITCH ? "glitch" : g == GH_DOZE ? "doze" : "off";
 }
 
 // M-UI-2/3: the persistent status bar. The existing title row IS the bar — title text on the left,
@@ -150,7 +154,7 @@ static void statusbar(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     int g = ghost_state(c);
     if (c->snap.logging)    ssd1306_blit(d, glyph_rec, glyph_rec_W, glyph_rec_H, 100, 0, SSD1306_BLIT_OR);
     if (c->snap.sd_mounted) ssd1306_blit(d, glyph_sd,  glyph_sd_W,  glyph_sd_H,  110, 0, SSD1306_BLIT_OR);
-    if (char_on() && g != GH_ABSENT && !((g == GH_PALE || g == GH_GLITCH) && (c->frame / 3u) % 2u == 0))
+    if (char_on() && g != GH_OFF && !((g == GH_PALE || g == GH_GLITCH) && (c->frame / 3u) % 2u == 0))
         ssd1306_blit(d, ghost_pip, ghost_pip_W, ghost_pip_H, 119, 0, SSD1306_BLIT_OR);
     aline(s, "BAR %c%c g:%s u%lu", c->snap.logging ? 'R' : '-', c->snap.sd_mounted ? 'S' : '-',
           ghost_name(g), (unsigned long)c->up_s);
@@ -205,9 +209,10 @@ static void hud_gauge_h(ssd1306_t *d, int x, int y, int w, int h, int pct) {
     if (fill > 0) ssd1306_draw_square(d, x + 1, y + 1, fill, h - 2);
 }
 
-#ifndef HG_NO_SCREEN_WIPE
-// M-UI-5: a ghostly screen-wipe — tile-XOR the checker dither across the frame. One frame = a static
-// flash between screens; no scratch buffer (XOR is reversible). Compile out with -DHG_NO_SCREEN_WIPE.
+#ifdef HG_SCREEN_WIPE
+// M-UI-5: an optional ghostly screen-wipe — tile-XOR the checker dither across the frame. OFF by
+// default: a single full-frame XOR at 4 Hz reads as a glitchy static flash, not a smooth transition, so
+// the default auto-cycle is a clean cut. Opt in with -DHG_SCREEN_WIPE if you want the effect.
 static void screen_wipe(ssd1306_t *d) {
     for (int y = 0; y < 64; y += 8)
         for (int x = 0; x < 128; x += 8)
@@ -334,10 +339,16 @@ static void draw_ghost_vitals(const dash_ctx_t *c, ssd1306_t *d, int x, int y) {
         return;
     }
     int g = ghost_state(c);
-    if (g == GH_ABSENT) return;
+    if (g == GH_OFF) return;
     if (g == GH_GLITCH && (c->frame / 2u) % 2u == 0) return;   // tear flicker
+    if (g == GH_DOZE) {                                          // no target traffic: a calm ghost dozing
+        int by = y + (int)((c->frame / 8u) % 2u);               // gentle chest-bob
+        ssd1306_blit(d, ghost_doze, ghost_doze_W, ghost_doze_H, x, by, SSD1306_BLIT_OR);
+        if ((c->frame / 5u) % 4u == 0) ssd1306_draw_string(d, x + 17, by - 4, 1, "z");   // occasional z
+        return;
+    }
     const uint8_t *spr = (g == GH_PALE) ? ghost_pale : (g == GH_GLITCH) ? ghost_glitch : ghost_live;
-    ssd1306_blit(d, spr, ghost_live_W, ghost_live_H, x, y, SSD1306_BLIT_OR);   // all three are 16x16
+    ssd1306_blit(d, spr, ghost_live_W, ghost_live_H, x, y, SSD1306_BLIT_OR);   // live/pale/glitch are 16x16
 }
 
 // ---------------- screens ----------------
@@ -584,7 +595,7 @@ void dashboard_task(void *ptr) {
     static dash_screen_t scr;
     static rec_snapshot_t last_good;
     int idx = 0;
-#ifndef HG_NO_SCREEN_WIPE
+#ifdef HG_SCREEN_WIPE
     int wipe_frames = 0, last_idx = -1;   // M-UI-5: screen-wipe state (function-local, persists across the loop)
 #endif
     uint32_t last_cycle = (uint32_t)(time_us_64() / 1000ull);
@@ -629,7 +640,7 @@ void dashboard_task(void *ptr) {
         idx = next_index(idx, now, &last_cycle);
         ctx.idx = idx;
         g_dash_screen = idx;
-#ifndef HG_NO_SCREEN_WIPE
+#ifdef HG_SCREEN_WIPE
         if (idx != last_idx) { if (char_on()) wipe_frames = 1; last_idx = idx; }   // M-UI-5: arm screen-wipe
 #endif
 
@@ -637,7 +648,7 @@ void dashboard_task(void *ptr) {
         if (ok) {
             ssd1306_clear(&disp);
             SCREENS[idx](&ctx, &disp, &scr);
-#ifndef HG_NO_SCREEN_WIPE
+#ifdef HG_SCREEN_WIPE
             if (wipe_frames > 0) { screen_wipe(&disp); wipe_frames--; }   // M-UI-5: ghostly transition flash
 #endif
             // Tick the show-success counter ONLY when the panel ACKed the burst (ssd1306_show >= 0) — so a
