@@ -21,5 +21,9 @@ secrets.py
 bridge_cfg.json
 config.json
 
+# Local-only, kept out of the public repo: private/internal docs + per-machine build config
+docs/private/
+firmware/c/build_fork.local.sh
+
 # OS
 .DS_Store

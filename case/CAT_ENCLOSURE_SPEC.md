@@ -2,8 +2,7 @@
 
 > Design spec, 2026-06-20. Evolves the existing "Field Recorder" pebble
 > ([`HACKAGOTCHI_CASE.md`](HACKAGOTCHI_CASE.md) / `hackagotchi_case.scad`) into **Hackagotchi** — a
-> desk-cat enclosure whose **face is the OLED**. Rationale in
-> [`../docs/go-to-market.md`](../docs/go-to-market.md): this is the single ignition lever — a still
+> desk-cat enclosure whose **face is the OLED**. The single ignition lever: a still
 > photo of the powered-off object must read unmistakably as a cat.
 
 ## Design thesis
