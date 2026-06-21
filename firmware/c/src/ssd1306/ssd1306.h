@@ -208,6 +208,34 @@ void ssd1306_draw_square(ssd1306_t *p, uint32_t x, uint32_t y, uint32_t width, u
 void ssd1306_draw_empty_square(ssd1306_t *p, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 
 /**
+	@brief [HACKAGOTCHI] 1-bit sprite blit op. Set sprite bits act; clear bits are transparent.
+*/
+typedef enum {
+    SSD1306_BLIT_OR     = 0,   /**< OR set bits in (lit sprite over background) */
+    SSD1306_BLIT_ANDNOT = 1,   /**< clear set bits (punch holes — e.g. eye-voids) */
+    SSD1306_BLIT_XOR    = 2,   /**< flip set bits (flash / invert / dissolve) */
+} ssd1306_blit_op_t;
+
+/**
+	@brief [HACKAGOTCHI] blit a packed 1-bit sprite (M-UI-1 UI-overhaul enabler).
+
+	Sprite packing matches the framebuffer / draw_pixel exactly: column-major page-rows,
+	spr[col + w*(row>>3)], bit (row&7), bit0 = topmost pixel of the page, 1 = lit. A w x h sprite is
+	w * ceil(h/8) bytes (FLASH-resident const). Fully clipped: x/y may be negative or off-panel and the
+	blit will NEVER write outside the framebuffer (the OOB guard a raw byte-OR lacks). See the pure,
+	host-unit-tested core in ssd1306_blit_impl.h.
+
+	@param[in] p : instance of display
+	@param[in] spr : packed 1-bit sprite data
+	@param[in] w : sprite width in pixels
+	@param[in] h : sprite height in pixels
+	@param[in] x : destination x (top-left), may be negative
+	@param[in] y : destination y (top-left), may be negative
+	@param[in] op : SSD1306_BLIT_OR / _ANDNOT / _XOR
+*/
+void ssd1306_blit(ssd1306_t *p, const uint8_t *spr, uint32_t w, uint32_t h, int32_t x, int32_t y, ssd1306_blit_op_t op);
+
+/**
 	@brief draw monochrome bitmap with offset
 
 	@param[in] p : instance of display

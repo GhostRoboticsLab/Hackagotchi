@@ -32,6 +32,7 @@ SOFTWARE.
 
 #include "ssd1306.h"
 #include "font.h"
+#include "ssd1306_blit_impl.h"   // [HACKAGOTCHI] pure 1-bit blit core (host-unit-tested)
 
 inline static void swap(int32_t *a, int32_t *b) {
     int32_t *t=a;
@@ -195,6 +196,12 @@ void ssd1306_draw_empty_square(ssd1306_t *p, uint32_t x, uint32_t y, uint32_t wi
     ssd1306_draw_line(p, x, y+height, x+width, y+height);
     ssd1306_draw_line(p, x, y, x, y+height);
     ssd1306_draw_line(p, x+width, y, x+width, y+height);
+}
+
+// [HACKAGOTCHI] M-UI-1: blit a packed 1-bit sprite. The enum values match HG_BLIT_* by construction;
+// all bit-packing + clipping lives in the pico-free, host-unit-tested core (ssd1306_blit_impl.h).
+void ssd1306_blit(ssd1306_t *p, const uint8_t *spr, uint32_t w, uint32_t h, int32_t x, int32_t y, ssd1306_blit_op_t op) {
+    hg_blit_into(p->buffer, (int)p->width, (int)p->height, spr, (int)w, (int)h, (int)x, (int)y, (int)op);
 }
 
 void ssd1306_draw_char_with_font(ssd1306_t *p, uint32_t x, uint32_t y, uint32_t scale, const uint8_t *font, char c) {
