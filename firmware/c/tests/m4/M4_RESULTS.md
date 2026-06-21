@@ -66,11 +66,19 @@ standing "don't gold-plate" directive on this exact M2 caveat, this is **accepte
 (the only "real fix" — RAM-pinning the DAP hot path — would fork the pristine upstream `probe.c` and re-spend
 the XIP RAM win, which the v1.1 plan rejected).
 
-**Open (target hardware, not firmware):** during the heavy repeated soaking the **target Pico W's QSPI flash
-glitched** (the M2 signature: cores answer SWD — probe-rs finds the MemoryAP — but flash program/verify fails
-100%, 0 stalls). It needs a **physical power-cycle**. The final hard-ceiling soak should be re-run on a
-power-cycled target for the confirmatory clean number; the 0-stall invariant + the ~3.7% idle-host floor are
-already established. The probe firmware is unaffected (DAP enumerates, all functional HIL pass).
+**Confirmatory clean soak (2026-06-21, both boards power-cycled, host idle): PASS — 13/300 (4.3%), 0 stalls**,
+recorder flawless (err=0, logging=1, wedge=0, rec_drop=0, rx 0→317k, on-card tail intact). This is the
+final hard-ceiling number; it confirms the ~4% idle-host floor (the earlier 90/300 was a concurrent host
+process; 300/300 was a glitched target). The power-cycle restored the target's AHB access port
+(`0 MemoryAP (AmbaAhb3)` under both cores — absent while glitched), which is what flash program/verify needs.
+
+**Target-hardware finding (orthogonal to firmware):** this particular target Pico W **re-glitches its QSPI
+under SUSTAINED flash hammering** — a fresh power-cycle gives one clean 150-cycle soak, then a back-to-back
+second soak brown-out-glitches it again (program/verify fails 100%, **still 0 stalls**). The probe firmware
+is provably unaffected: 0 stalls in EVERY run all session, DAP enumerates, `{"q":"status"}` clean + the
+dashboard `n` keeps incrementing. For future soak campaigns, power-cycle the target between long runs (or use
+a fresh target board); it's a target-board fragility, not a probe defect. The 0-stall correctness invariant
+held across every single run regardless.
 
 **Verdict: M4 = COMPLETE.** Hex sniffer · macro sender · baud select · SD explorer · settings persistence,
 all CDC1-driven + snapshot-fed, audit-hardened, R1 0-stall-clean. Device on `/tmp/hg-build-m4`.

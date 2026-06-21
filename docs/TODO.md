@@ -137,7 +137,9 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     closeout (SPSC inject/baud/open-log read confirmed safe; fixed a do_ls_read OOB on a long filename,
     restored the soak's hard 8% ceiling, disclosed a benign hg_config torn-read). R1: 0 stalls every soak;
     retryable DAP-fail rate ~1%->~4% idle-host (XIP-layout, accepted "don't gold-plate"). See M4_RESULTS.md.
-    NOTE: target Pico W QSPI-glitched mid-session (needs power-cycle) — re-run the final clean soak after.
+    Confirmatory clean soak (both boards power-cycled): PASS 13/300 (4.3%), 0 stalls, recorder flawless.
+    Finding: this target board re-glitches its QSPI under sustained hammering (power-cycle between long runs);
+    orthogonal to the probe firmware (0 stalls every run).
 - [ ] M5 polish + tagged release (.uf2 + .elf): CI green on all gates, license/NOTICE bundle, flashing guide.
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,
   tighter analyzers, RTT observability.
