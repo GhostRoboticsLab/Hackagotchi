@@ -2,7 +2,7 @@
 
 All notable changes to the Hackagotchi C probe firmware (`firmware/c`) are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); versions are the firmware tags
-`fw-c-v<x.y.z>`. The semver is compiled into the binary and reported by `{"q":"status"}` → `"ver"`.
+`v<x.y.z>`. The semver is compiled into the binary and reported by `{"q":"status"}` → `"ver"`.
 
 ## [1.0.0] - 2026-06-21
 

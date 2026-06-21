@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Firmware version (e.g. 0.1.0). Tag will be fw-c-v<version> if publishing."
+        description: "Firmware version (e.g. 0.1.0). Tag will be v<version> if publishing."
         type: string
         required: true
       publish_release:
@@ -77,7 +77,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="fw-c-v${{ inputs.version }}"
+          tag="v${{ inputs.version }}"
           # Release notes: prefer a curated docs/RELEASE_NOTES_v<ver>.md, else the CHANGELOG section, else a default.
           notes="$(mktemp)"
           rel="docs/RELEASE_NOTES_v${{ inputs.version }}.md"

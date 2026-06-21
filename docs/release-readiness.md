@@ -1,4 +1,4 @@
-# Release readiness — `fw-c-v1.0.0`
+# Release readiness — `v1.0.0`
 
 The single evidence index for the C probe firmware release. It draws the line between what **CI can
 automate** and what is **operator-attested on real hardware**, and pins each green to the *tagged
@@ -14,12 +14,13 @@ image* (not a per-increment dev build).
 
 | | |
 |---|---|
-| Tag | `fw-c-v1.0.0` |
+| Tag | `v1.0.0` |
 | Version (compiled in) | `1.0.0` — reported live by `{"q":"status"}` → `"ver"` |
 | Base | fork of `raspberrypi/debugprobe` @ `debugprobe-v2.2.3` (single-core FreeRTOS) |
-| Local build (attested image) | `text 170604 / bss 84140` · `.uf2` sha256 `7d1a2b50…27047` · `.elf` sha256 `5883d054…ee3c0` |
-| Released artifact | **byte-identical local rebuild** — `.uf2` sha256 `7d1a2b50…27047` matches the attested image bit-for-bit. The self-hosted CI runner was offline after a power-cycle, so v1.0.0 was built locally from the tagged source (reproducible) and released directly; CI remains available for future tags. |
-| Published | **tag `fw-c-v1.0.0` @ `9bae90b`** · [Release](https://github.com/GhostRoboticsLab/Hackagotchi/releases/tag/fw-c-v1.0.0) (`.uf2` + `.elf` + NOTICE + LICENSE) · 2026-06-21 |
+| Local build (attested image) | `text 170604 / bss 84140` · `.uf2` sha256 `7d1a2b50…27047` · `.elf` sha256 `149708ea…f380` |
+| Released artifact | **byte-identical local rebuild** — `.uf2` sha256 `7d1a2b50…27047` matches the attested image bit-for-bit. The self-hosted CI runner was offline after a power-cycle, so it was built locally from the tagged source (reproducible) and released directly; CI remains available for future tags. |
+| Published | **tag `v1.0.0` @ `f891eaa`** · [Release](https://github.com/GhostRoboticsLab/Hackagotchi/releases/tag/v1.0.0) (`.uf2` + `.elf` + NOTICE + LICENSE) · 2026-06-21 |
+| History note | On 2026-06-21 the public history was rewritten — agent co-author/session trailers stripped from the maintainer's commits, internal strategy docs purged. The original immutable `fw-c-v1.0.0` tag could not be re-pointed (GitHub permanently reserves immutable-release tag names), so the cleaned release is published as **`v1.0.0`** at the rewritten commit `f891eaa`; the `.uf2` is byte-identical to the pre-rewrite attested image (firmware source is unchanged by the rewrite). |
 
 ## Section A — CI-automated (`firmware-c.yml`)
 
