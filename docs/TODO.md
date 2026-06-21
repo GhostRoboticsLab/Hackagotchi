@@ -131,7 +131,14 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     are gone; `rtc_read=NULL` → recorder stamps uptime (`+Ns`); screen 5 CLOCK→UPTIME; I2C1 at 1 MHz.
     `screen_hil`/`feedback_hil` PASS (shows==loops at 1 MHz), coexist R1 = 0 stalls/300 ops, OLED visually
     crisp at FM+. Simplifies the OLED path ahead of M4. See M3_RESULTS.md "Post-M3 simplification".
-- [ ] M4 full UI parity (Macro/Baud/SD-explorer via CDC1+snapshot redesign); M5 polish + tagged release (.uf2 + .elf).
+- [x] **M4 full UI parity** — **COMPLETE, HIL-verified** *(2026-06-21, commits 792b84f..00dcaa4)*: hex
+    sniffer · macro sender · baud select · SD explorer · settings persistence — all CDC1-driven + snapshot-
+    fed (no button), tool screens excluded from auto-cycle, config persisted to config.txt on SD. Adversarial
+    closeout (SPSC inject/baud/open-log read confirmed safe; fixed a do_ls_read OOB on a long filename,
+    restored the soak's hard 8% ceiling, disclosed a benign hg_config torn-read). R1: 0 stalls every soak;
+    retryable DAP-fail rate ~1%->~4% idle-host (XIP-layout, accepted "don't gold-plate"). See M4_RESULTS.md.
+    NOTE: target Pico W QSPI-glitched mid-session (needs power-cycle) — re-run the final clean soak after.
+- [ ] M5 polish + tagged release (.uf2 + .elf): CI green on all gates, license/NOTICE bundle, flashing guide.
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,
   tighter analyzers, RTT observability.
 
