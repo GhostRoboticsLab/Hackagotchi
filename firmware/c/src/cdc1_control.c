@@ -157,6 +157,21 @@ static bool get_int(const char *js, const jsmntok_t *tok, int ntok, const char *
   return false;
 }
 
+// Copy the string value of top-level key `key` into out[]. Returns true iff found as a string value.
+static bool get_str(const char *js, const jsmntok_t *tok, int ntok,
+                    const char *key, char *out, size_t outsz) {
+  for (int i = 1; i + 1 < ntok; i++) {
+    if (tok_eq(js, &tok[i], key) && tok[i + 1].type == JSMN_STRING) {
+      int vlen = tok[i + 1].end - tok[i + 1].start;
+      if (vlen <= 0 || (size_t) vlen >= outsz) return false;
+      memcpy(out, js + tok[i + 1].start, (size_t) vlen);
+      out[vlen] = '\0';
+      return true;
+    }
+  }
+  return false;
+}
+
 // Parse + dispatch one complete JSON request line.
 static void handle_line(uint8_t itf, const char *line, int len) {
   jsmn_parser p;
@@ -215,12 +230,22 @@ static void handle_line(uint8_t itf, const char *line, int len) {
     static char r[48]; snprintf(r, sizeof r, "{\"sent\":%d,\"macro\":\"%s\"}\n", i, m);
     reply(itf, r); return;
   }
+  // M4.5: edit a macro and persist. {"q":"setmacro","i":N,"s":"TEXT"} (TEXT truncated to 14).
+  if (!strcmp(q, "setmacro")) {
+    int i; if (!get_int(line, tok, n, "i", &i)) { reply(itf, "{\"err\":\"noi\"}\n"); return; }
+    if (i < 0 || i >= HG_N_MACROS) { reply(itf, "{\"err\":\"range\"}\n"); return; }
+    char sv[HG_MACRO_MAX]; if (!get_str(line, tok, n, "s", sv, sizeof sv)) { reply(itf, "{\"err\":\"nos\"}\n"); return; }
+    hg_set_macro(i, sv); sd_config_save_request();
+    static char r[48]; snprintf(r, sizeof r, "{\"macro\":%d,\"set\":\"%s\"}\n", i, hg_macro(i));
+    reply(itf, r); return;
+  }
   // M4.3 baud selector: {"q":"baud"} reads current + options; {"q":"baud","v":N} sets it (validated).
   if (!strcmp(q, "baud")) {
     int v;
     if (get_int(line, tok, n, "v", &v)) {
       if (!hg_set_baud((uint32_t)v)) { reply(itf, "{\"err\":\"badbaud\"}\n"); return; }
       cdc_uart_set_baud_request((uint32_t)v);          // applied by cdc_task (the UART owner)
+      sd_config_save_request();                        // M4.5: persist the new baud to SD
       char r[24]; snprintf(r, sizeof r, "{\"baud\":%d}\n", v); reply(itf, r); return;
     }
     static char r[120]; int o = snprintf(r, sizeof r, "{\"baud\":%lu,\"opts\":[", (unsigned long)hg_baud());

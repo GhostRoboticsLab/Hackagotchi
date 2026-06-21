@@ -64,4 +64,7 @@ void sd_ls_json(char *out, unsigned outsz);
 void sd_cat_request(int idx, uint32_t off);     // {"q":"cat","i":N,"off":M}: page of log_NNN.txt
 void sd_cat_json(char *out, unsigned outsz);
 
+// M4.5: request the SD task to persist the current config (baud + macros) to the SD card.
+void sd_config_save_request(void);
+
 #endif // HACKAGOTCHI_SD_GATE_H

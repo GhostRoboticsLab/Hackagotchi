@@ -20,6 +20,8 @@
 #include "recorder.h"
 #include "uart_bridge.h"
 #include "feedback.h"      // M3.0: non-blocking LED/buzzer service (serviced from this low-prio task)
+#include "hg_config.h"     // M4.5: persisted baud + macros (KV config file on the SD card)
+#include "hackagotchi_dashboard.h"   // M4.1: dash_hex_mode() — gate the per-loop raw-tail copy
 
 TaskHandle_t sd_gate_taskhandle;
 
@@ -137,9 +139,12 @@ static void do_ls_read(void) {
     if (f_findfirst(&dir, &fno, "", "log_*.txt") == FR_OK) {
         while (fno.fname[0]) {
             n++;
-            if (listed < 24 && o + 20 < sizeof s_ls_buf) {
-                o += (size_t)snprintf(s_ls_buf + o, sizeof s_ls_buf - o, "%s\"%s\"", listed ? "," : "", fno.fname);
-                listed++;
+            if (listed < 24) {
+                // snprintf returns the WOULD-BE length; with FF_USE_LFN a card-supplied long name matching
+                // log_*.txt could exceed the buffer, so advance o ONLY if the entry actually fit (no OOB).
+                int w = snprintf(s_ls_buf + o, sizeof s_ls_buf - o, "%s\"%s\"", listed ? "," : "", fno.fname);
+                if (w >= 0 && (size_t)w < sizeof s_ls_buf - o) { o += (size_t)w; listed++; }
+                else listed = 24;   // won't fit -> stop listing (keep counting n); s_ls_buf[o] stays in bounds
             }
             if (f_findnext(&dir, &fno) != FR_OK) break;
         }
@@ -170,6 +175,26 @@ static void do_cat_read(void) {
     s_cat_eof = ((FSIZE_t)s_cat_off + br >= sz);
 }
 
+// ---- M4.5 settings persistence: load/save the KV config file on the SD card (SD-task-owned I/O) ----
+#define HG_CONFIG_FILE "config.txt"
+static volatile bool s_cfg_save_req = false;
+void sd_config_save_request(void) { s_cfg_save_req = true; }
+
+static void do_config_load(void) {
+    FIL f; char buf[256]; UINT br = 0;
+    if (f_open(&f, HG_CONFIG_FILE, FA_READ) != FR_OK) return;   // absent on first boot -> defaults stand
+    f_read(&f, buf, sizeof buf - 1, &br); f_close(&f);
+    hg_config_apply_kv(buf, br);
+}
+
+static void do_config_save(void) {
+    char buf[256]; int n = hg_config_serialize(buf, sizeof buf);
+    if (n <= 0) return;
+    FIL f;
+    if (f_open(&f, HG_CONFIG_FILE, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) return;
+    UINT bw = 0; f_write(&f, buf, (UINT)n, &bw); f_close(&f);
+}
+
 // Device-side recorder load generator (HIL hook for the SD-during-flash coexistence soak). When on,
 // the SD task synthesizes recorder data every loop -> continuous f_write/f_sync to the card, with NO
 // host UART traffic. A concurrent probe-rs flash soak then measures pure SD-vs-DAP contention, without
@@ -197,7 +222,8 @@ static void publish_snapshot(void) {
         s.tp_peak  = st.tp_peak;  s.last_err = (int)st.last_err;
         snprintf(s.file, sizeof s.file, "%s", st.log_file);     // bounded copy, not a live pointer
         recorder_copy_tail(&g_rec, sizeof s.tail - 1, s.tail, sizeof s.tail);
-        s.rawn = (uint8_t)recorder_copy_raw_tail(&g_rec, sizeof s.raw, s.raw, sizeof s.raw);  // M4 hex view
+        if (dash_hex_mode())   // M4.1: only pay the raw-byte copy when the hex view is actually shown
+            s.rawn = (uint8_t)recorder_copy_raw_tail(&g_rec, sizeof s.raw, s.raw, sizeof s.raw);
     }
     s.sd_mounted = s_mounted;
     s.log_count  = (uint16_t)s_log_count;   // M4.4: cached log_*.txt count for the SD-EXPLORER screen
@@ -253,7 +279,9 @@ void sd_gate_task(void *ptr) {
     (void)ptr;
     run_selftest();
     if (s_mounted) {
-        recorder_init(&g_rec, &REC_HW, PROBE_UART_BAUDRATE);
+        do_config_load();                            // M4.5: restore persisted baud + macros first
+        cdc_uart_set_baud_request(hg_baud());        // apply the (possibly restored) baud to the target UART
+        recorder_init(&g_rec, &REC_HW, hg_baud());   // session header reflects the actual baud
         recorder_start(&g_rec, (uint32_t)(time_us_64() / 1000ull));   // auto-start logging at boot
         feedback_beep(2000, 60);   // M3.3: a single "alive" chirp at boot (full jingles -> UI rewrite)
         do_ls_read();              // M4.4: populate the cached log count for the SD-EXPLORER screen
@@ -274,6 +302,7 @@ void sd_gate_task(void *ptr) {
         if (s_tail_req) { do_tail_read(); s_tail_req = false; }
         if (s_ls_req)   { do_ls_read();   s_ls_req = false; }   // M4.4 SD explorer (async, off the hot path)
         if (s_cat_req)  { do_cat_read();  s_cat_req = false; }
+        if (s_cfg_save_req) { do_config_save(); s_cfg_save_req = false; }   // M4.5 persist on change
         publish_snapshot();          // M3: hand the dashboard + CDC1 a consistent copy of recorder state
         drive_feedback();            // M3.3: map recorder events -> buzzer + NeoPixel (edge-detected)
         feedback_service(now);       // M3.0: apply the latched beep/pixel + buzzer-off, off the hot path

@@ -44,12 +44,17 @@ def main():
                 except Exception: pass
             return {}
 
+        # Establish a known alive + GREEN baseline first: loopback on, then a non-trigger "wake" byte to
+        # clear any lingering wedge from a prior run / idle silence (the rx_ever sequencing artifact). This
+        # makes the green-baseline assertion deterministic + order-independent (M4 closeout fix).
+        lo = ctrl('{"q":"uloop_on"}'); print("uloop_on:", lo)
+        chk(lo.get("uloop") == 1, "UART loopback enabled")
+        d.reset_input_buffer(); d.write(b"wake\n"); d.flush(); time.sleep(1.5)
         print("baseline:", ctrl('{"q":"rec"}'))
         fb0 = ctrl('{"q":"fb"}'); print("fb baseline:", fb0)
         beeps0 = fb0.get("beeps", 0)
+        crashes0 = ctrl('{"q":"status"}').get("crashes", -1)
         chk(fb0.get("g", 0) > 0 and fb0.get("r", 0) == 0, "status LED dim-GREEN while logging (no fault)")
-        lo = ctrl('{"q":"uloop_on"}'); print("uloop_on:", lo)
-        chk(lo.get("uloop") == 1, "UART loopback enabled")
 
         d.reset_input_buffer(); d.write(b"FATAL: trigger test\n"); d.flush(); time.sleep(1.5)
         r1 = ctrl('{"q":"rec"}'); print("after FATAL:", r1)
@@ -76,7 +81,10 @@ def main():
         chk(fb3.get("g", 0) > 0 and fb3.get("r", 0) == 0, "recovery returned the NeoPixel to GREEN")
 
         ctrl('{"q":"uloop_off"}')
-        chk(ctrl('{"q":"status"}').get("crashes", -1) == 0, "no crash through the sequence")
+        crashes1 = ctrl('{"q":"status"}').get("crashes", -2)
+        # Delta-based: the feedback sequence must add ZERO crashes. An absolute ==0 false-fails after other
+        # tests' deliberate {"q":"crash"} reboots bumped the cumulative counter (caught in the M4 closeout).
+        chk(crashes1 == crashes0 >= 0, f"no crash through the sequence (crashes {crashes0}->{crashes1})")
 
     print("\nM3.3 EVENT TRANSITIONS:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
