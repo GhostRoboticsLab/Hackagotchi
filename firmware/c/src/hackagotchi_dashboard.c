@@ -183,19 +183,37 @@ static void hud_gauge_h(ssd1306_t *d, int x, int y, int w, int h, int pct) {
     if (fill > 0) ssd1306_draw_square(d, x + 1, y + 1, fill, h - 2);
 }
 
-// ---------------- the cat mascot (ported pixel-for-pixel from main.py draw_cat) ----------------
+// M-UI-4: the cat's mood is a readout of the bench, derived ONLY from existing dash_ctx fields (no new
+// cross-task reads). ALERT when the target is in trouble; HUNTING when data is really flowing; CONTENT
+// when the target chats calmly; SLEEP when idle. Attested as cat:<mood> on HOME (turns the proven
+// procedural mascot into a real status surface without re-architecting draw_cat's geometry).
+enum { CAT_SLEEP = 0, CAT_CONTENT, CAT_HUNTING, CAT_ALERT };
+static int cat_mood(const dash_ctx_t *c) {
+    if (c->snap.wedge || c->snap.last_err) return CAT_ALERT;
+    if (!c->active)                        return CAT_SLEEP;
+    if (c->tp_now >= 50u)                  return CAT_HUNTING;   // real data flowing -> on the hunt
+    return CAT_CONTENT;
+}
+static const char *cat_name(int m) {
+    return m == CAT_HUNTING ? "hunting" : m == CAT_ALERT ? "alert" : m == CAT_CONTENT ? "content" : "sleep";
+}
+
+// ---------------- the cat mascot (ported pixel-for-pixel from main.py draw_cat, M-UI-4 mood layer) ----
 // ssd1306 maps: rect->draw_empty_square, fill_rect(.,1)->draw_square, line->draw_line, pixel->draw_pixel,
 // pixel(.,0)->clear_pixel, text->draw_string. The mascot lives at the right of the Home screen.
-static void draw_cat(ssd1306_t *d, bool active, uint32_t tick, const char *last_type) {
-    static bool     last_active = false;
+static void draw_cat(ssd1306_t *d, int mood, uint32_t tick, const char *last_type, uint32_t tp_now) {
+    static int      last_mood = CAT_SLEEP;
     static uint32_t yawn_end = 0;
     uint32_t now = (uint32_t)(time_us_64() / 1000ull);
-    if (active && !last_active) yawn_end = now + 1200u;
-    last_active = active;
-    bool yawning = active && (now < yawn_end);
+    bool awake = (mood != CAT_SLEEP);
+    if (awake && last_mood == CAT_SLEEP) yawn_end = now + 1200u;   // just woke -> stretch/yawn
+    last_mood = mood;
+    bool yawning = awake && mood != CAT_ALERT && (now < yawn_end);
 
     int cx = 94, cy = 28;
-    if (!active) cy += (int)((tick / 8u) % 2u);              // sleeping chest-breath
+    if (mood == CAT_SLEEP)        cy += (int)((tick / 8u) % 2u);   // sleeping chest-breath
+    else if (mood == CAT_HUNTING) cy += 2;                          // crouched, ready to pounce
+    else if (mood == CAT_ALERT)   cy -= 1;                          // bolt upright
 
     ssd1306_draw_empty_square(d, cx, cy, 28, 20);            // head
     ssd1306_draw_line(d, cx, cy, cx + 5, cy - 8);           // ears
@@ -208,7 +226,8 @@ static void draw_cat(ssd1306_t *d, bool active, uint32_t tick, const char *last_
     ssd1306_draw_line(d, cx + 26, cy + 11, cx + 32, cy + 10);
     ssd1306_draw_line(d, cx + 26, cy + 13, cx + 32, cy + 13);
 
-    uint32_t tail = (tick / 4u) % 3u;                        // wagging tail
+    uint32_t tdiv = (mood == CAT_HUNTING) ? 2u : (mood == CAT_ALERT) ? 1u : 4u;  // faster wag when busy
+    uint32_t tail = (tick / tdiv) % 3u;                      // wagging tail
     int tx = cx + 27, ty = cy + 15;
     if (tail == 0)      { ssd1306_draw_line(d, tx, ty, tx + 4, ty - 2); ssd1306_draw_line(d, tx + 4, ty - 2, tx + 6, ty - 6); }
     else if (tail == 1) { ssd1306_draw_line(d, tx, ty, tx + 5, ty);     ssd1306_draw_line(d, tx + 5, ty, tx + 7, ty - 3); }
@@ -222,19 +241,33 @@ static void draw_cat(ssd1306_t *d, bool active, uint32_t tick, const char *last_
         ssd1306_draw_empty_square(d, bx, by, 26, 11);
         ssd1306_draw_line(d, bx + 16, by + 10, cx + 2, cy + 2);
         ssd1306_draw_string(d, bx + 2, by + 2, 1, "yawn");
-    } else if (active) {
+    } else if (mood == CAT_ALERT) {
+        ssd1306_draw_square(d, cx + 4, cy + 5, 6, 6);        // eyes wide + alarmed (pupils up)
+        ssd1306_draw_square(d, cx + 18, cy + 5, 6, 6);
+        ssd1306_clear_pixel(d, cx + 6, cy + 5);
+        ssd1306_clear_pixel(d, cx + 20, cy + 5);
+        ssd1306_draw_empty_square(d, cx + 11, cy + 13, 5, 5);   // open "O" mouth
+        int bx = cx - 13, by = cy - 13;                      // bubble shouts "!!"
+        ssd1306_draw_empty_square(d, bx, by, 21, 11);
+        ssd1306_draw_line(d, bx + 14, by + 10, cx + 2, cy + 2);
+        ssd1306_draw_string(d, bx + 7, by + 2, 1, "!!");
+    } else if (awake) {   // CONTENT or HUNTING share the lively render; speed scales with throughput
         ssd1306_draw_square(d, cx + 4, cy + 5, 6, 6);        // eyes wide
         ssd1306_draw_square(d, cx + 18, cy + 5, 6, 6);
-        ssd1306_clear_pixel(d, cx + 5, cy + 6);              // pupils
-        ssd1306_clear_pixel(d, cx + 19, cy + 6);
+        int look = (mood == CAT_HUNTING) ? (int)((tick / 2u) % 2u) : 0;   // pupils track the stream
+        ssd1306_clear_pixel(d, cx + 5 + look, cy + 6);       // pupils
+        ssd1306_clear_pixel(d, cx + 19 + look, cy + 6);
         if ((tick / 3u) % 2u == 0) ssd1306_draw_square(d, cx + 12, cy + 14, 5, 3);   // mouth
         else ssd1306_draw_line(d, cx + 13, cy + 15, cx + 15, cy + 15);
         int bx = cx - 13, by = cy - 13;                      // TX/RX bubble
         ssd1306_draw_empty_square(d, bx, by, 21, 11);
         ssd1306_draw_line(d, bx + 14, by + 10, cx + 2, cy + 2);
         ssd1306_draw_string(d, bx + 3, by + 2, 1, last_type);
-        ssd1306_draw_pixel(d, 45 + (int)((tick * 7u) % 40u), 26);   // flying data particles
-        ssd1306_draw_pixel(d, 45 + (int)(((tick + 3u) * 7u) % 40u), 42);
+        // flying data particles — speed + count scale with live throughput (telemetry hidden in delight)
+        uint32_t sp = (tp_now >= 200u) ? 17u : (tp_now >= 50u) ? 11u : 6u;
+        ssd1306_draw_pixel(d, 45 + (int)((tick * sp) % 40u), 26);
+        ssd1306_draw_pixel(d, 45 + (int)(((tick + 3u) * sp) % 40u), 42);
+        if (mood == CAT_HUNTING) ssd1306_draw_pixel(d, 45 + (int)(((tick + 6u) * sp) % 40u), 34);
     } else {
         bool blink = (tick % 40u) >= 37u;
         if (blink) {
@@ -278,12 +311,13 @@ static void screen_home(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     ssd1306_draw_string(d, 4, 22, 1, "up"); ssd1306_draw_string(d, 20, 22, 1, up);
     ssd1306_draw_string(d, 4, 32, 1, c->snap.logging ? "REC" : "off");
     if (c->snap.alert[0]) { ssd1306_draw_string(d, 28, 32, 1, "!"); }
-    draw_cat(d, c->active, c->frame, "RX");
+    int mood = cat_mood(c);
+    draw_cat(d, mood, c->frame, "RX", c->tp_now);
     draw_ghost_vitals(c, d, 4, 46);   // M-UI-3: Spectre, bottom-left — paired diagonally with the cat
     // attestation summary
     aline(s, "rx %s", rx); aline(s, "up %s", up);
     aline(s, "%s%s", c->snap.logging ? "REC" : "off", c->snap.alert[0] ? " !" : "");
-    aline(s, "cat:%s", c->active ? "active" : "idle");
+    aline(s, "cat:%s", cat_name(mood));
 }
 
 // 1 — SNIFFER: live UART tail (the recorder freeze tail), wrapped to 21-col lines.
