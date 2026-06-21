@@ -37,6 +37,11 @@ set(ADVERSARIAL_STALL_MS 0 CACHE STRING "Gate-1 adversarial stall (ms) injected 
 # with DAP (the idle-priority stall is preempted in ~50us = a no-op threat). NOT a product config.
 option(ADVERSARIAL_AT_DAP_PRIO "Run the OLED stress task at DAP priority (adversarial contention test)" OFF)
 
+# M5: firmware semver compiled into the {"q":"status"} reply so a flashed board self-identifies its
+# release (the git tag / artifact name alone is NOT in the binary). build_fork.sh threads VERSION here;
+# CI passes the workflow `version` input. Default marks an untagged local/dev build.
+set(HG_VERSION "0.0.0-dev" CACHE STRING "Hackagotchi firmware semver reported by {\"q\":\"status\"}")
+
 # [HACKAGOTCHI] M2: carlk3 no-OS-FatFS-SD (SDIO+SPI) for the SD black-box recorder. Fetched by
 # setup.sh into the gitignored upstream/ (same pattern as debugprobe), NOT a submodule. INTERFACE lib;
 # our src/sd/hw_config.c provides the SPI0 pin map. Requires pico_sdk_init() to have run (above).
@@ -112,6 +117,7 @@ target_compile_definitions(hackagotchi_probe PRIVATE
         BOARD_HACKAGOTCHI=1
         PICO_RP2040_USB_DEVICE_ENUMERATION_FIX=1
         ADVERSARIAL_STALL_MS=${ADVERSARIAL_STALL_MS}
+        HG_VERSION="${HG_VERSION}"   # CMake escapes the quotes -> a C string literal
 )
 if(ADVERSARIAL_AT_DAP_PRIO)
     target_compile_definitions(hackagotchi_probe PRIVATE ADVERSARIAL_AT_DAP_PRIO=1)

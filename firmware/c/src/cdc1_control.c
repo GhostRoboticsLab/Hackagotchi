@@ -48,6 +48,11 @@
 #else
 #define HACKA_DASH_PRIO 0
 #endif
+// M5: release semver, set by -DHG_VERSION from the CMake cache var (build_fork.sh VERSION / CI input).
+// Falls back to a dev marker for a bare `make`. Reported as "ver" in {"q":"status"} for provenance.
+#ifndef HG_VERSION
+#define HG_VERSION "0.0.0-dev"
+#endif
 
 #define CDC_ITF_CONTROL 1  // CDC1 = JSON control (CDC0 / instance 0 = UART bridge, in cdc_uart.c)
 #define LINE_MAX 128       // bounded request line buffer — overflow resets it, never overruns
@@ -66,18 +71,21 @@ static void reply(uint8_t itf, const char *s) {
   tud_cdc_n_write_flush(itf);
 }
 
-// The status/telemetry line. "fw" stays first (gate2_cdc.py compat); n/stall_*/prio self-attest the
-// build; crashes/wd_armed/page expose the M1 reliability + nav state.
+// The status/telemetry line. "fw" stays first by convention (gate2_cdc.py checks fw PRESENCE via
+// obj.get("fw"), not position, so field order is actually free); "ver" is the M5 compiled-in release
+// semver (provenance); n/stall_*/prio self-attest the build; crashes/wd_armed/page expose the M1
+// reliability + nav state.
 // NOTE: reply/token buffers are `static`, NOT stack — this callback runs only in the single (non-
 // reentrant) TUD task, and ~0.5 KB of JSON locals on the small USB task stack overflows it (corrupts
 // the USB endpoint state -> the host sees ENXIO). Keep big buffers off this stack.
 static void write_status(uint8_t itf) {
-  static char r[240];
+  static char r[256];
   int len = snprintf(r, sizeof r,
-                     "{\"fw\":\"Hackagotchi\",\"heap\":%u,\"up\":%u,\"n\":%u,"
+                     "{\"fw\":\"Hackagotchi\",\"ver\":\"%s\",\"heap\":%u,\"up\":%u,\"n\":%u,"
                      "\"stall_cfg\":%d,\"stall_us\":%u,\"prio\":%d,"
                      "\"crashes\":%u,\"wd_armed\":%d,\"wd_gap\":%u,\"tud\":%u,\"page\":%d,"
                      "\"urx_drop\":%u,\"urx_hw\":%u,\"utx_drop\":%u,\"frag\":%u}\n",
+                     HG_VERSION,
                      (unsigned) xPortGetFreeHeapSize(),
                      (unsigned) (time_us_64() / 1000000ull),
                      (unsigned) g_dash_counter, (int) ADVERSARIAL_STALL_MS,

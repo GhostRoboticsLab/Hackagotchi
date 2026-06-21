@@ -16,6 +16,9 @@ PICO_SDK_PATH="${PICO_SDK_PATH:-/Volumes/MacSSD1/DeveloperWorkspace/fw-build/mic
 BUILD_DIR="${BUILD_DIR:-$HERE/build}"
 ADVERSARIAL_STALL_MS="${ADVERSARIAL_STALL_MS:-0}"
 ADVERSARIAL_AT_DAP_PRIO="${ADVERSARIAL_AT_DAP_PRIO:-OFF}"
+# M5: release semver compiled into the firmware (reported by {"q":"status"} as "ver"). Override with
+# VERSION=1.0.0 ./build_fork.sh ; CI passes the workflow `version` input. Default = untagged dev build.
+HG_VERSION="${VERSION:-${HG_VERSION:-0.0.0-dev}}"
 
 [ -x "$GCC_DIR/bin/arm-none-eabi-gcc" ] || { echo "pinned Arm GCC not found at $GCC_DIR/bin"; exit 1; }
 [ -d "$PICO_SDK_PATH" ] || { echo "pico-sdk not found at $PICO_SDK_PATH"; exit 1; }
@@ -35,6 +38,7 @@ fi
 echo "[build] gcc      : $(arm-none-eabi-gcc --version | head -1)"
 echo "[build] pico-sdk : $PICO_SDK_PATH"
 echo "[build] stall    : ADVERSARIAL_STALL_MS=$ADVERSARIAL_STALL_MS"
+echo "[build] version  : HG_VERSION=$HG_VERSION"
 echo "[build] out dir  : $BUILD_DIR"
 
 rm -rf "$BUILD_DIR" && mkdir -p "$BUILD_DIR"
@@ -43,6 +47,7 @@ cmake "$HERE" \
     -DPICO_SDK_PATH="$PICO_SDK_PATH" \
     -DADVERSARIAL_STALL_MS="$ADVERSARIAL_STALL_MS" \
     -DADVERSARIAL_AT_DAP_PRIO="$ADVERSARIAL_AT_DAP_PRIO" \
+    -DHG_VERSION="$HG_VERSION" \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 make -j
 

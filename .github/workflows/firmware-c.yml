@@ -51,7 +51,8 @@ jobs:
         working-directory: firmware/c
         run: |
           set -euo pipefail
-          ./build_fork.sh
+          # Thread the release semver into the binary so {"q":"status"} reports "ver" matching the tag.
+          VERSION='${{ inputs.version }}' ./build_fork.sh
           echo "uf2=$(pwd)/build/hackagotchi_probe.uf2" >> "$GITHUB_OUTPUT"
           echo "elf=$(pwd)/build/hackagotchi_probe.elf" >> "$GITHUB_OUTPUT"
           # Provenance: the descriptor + pin map are embedded; surface them in the log.
