@@ -18,7 +18,8 @@ image* (not a per-increment dev build).
 | Version (compiled in) | `1.0.0` — reported live by `{"q":"status"}` → `"ver"` |
 | Base | fork of `raspberrypi/debugprobe` @ `debugprobe-v2.2.3` (single-core FreeRTOS) |
 | Local build (attested image) | `text 170604 / bss 84140` · `.uf2` sha256 `7d1a2b50…27047` · `.elf` sha256 `5883d054…ee3c0` |
-| Canonical artifact | the CI Release `.uf2`/`.elf` (rebuilt from this tagged source on the runner; functionally identical) |
+| Released artifact | **byte-identical local rebuild** — `.uf2` sha256 `7d1a2b50…27047` matches the attested image bit-for-bit. The self-hosted CI runner was offline after a power-cycle, so v1.0.0 was built locally from the tagged source (reproducible) and released directly; CI remains available for future tags. |
+| Published | **tag `fw-c-v1.0.0` @ `9bae90b`** · [Release](https://github.com/GhostRoboticsLab/Hackagotchi/releases/tag/fw-c-v1.0.0) (`.uf2` + `.elf` + NOTICE + LICENSE) · 2026-06-21 |
 
 ## Section A — CI-automated (`firmware-c.yml`)
 
