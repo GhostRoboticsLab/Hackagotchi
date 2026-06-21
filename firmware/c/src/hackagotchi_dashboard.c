@@ -362,11 +362,24 @@ static void screen_baud(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     }
 }
 
+// 8 (tool) — SD EXPLORER: card status + log count; browse over CDC1 {"q":"ls"} / {"q":"cat","i":N}.
+static void screen_sd(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
+    const rec_snapshot_t *r = &c->snap;
+    hdr(d, s, "SD EXPLORER");
+    if (!r->sd_mounted) { row(d, s, 0, "SD not mounted"); return; }
+    row(d, s, 0, "%u log files", (unsigned)r->log_count);
+    row(d, s, 1, "cur %s", r->file[0] ? r->file : "(none)");
+    char rx[12]; fmt_bytes(rx, sizeof rx, r->rx_total);
+    row(d, s, 2, "rx %s", rx);
+    row(d, s, 3, "host {\"q\":\"ls\"}");
+    row(d, s, 4, "{\"q\":\"cat\",\"i\":N}");
+}
+
 static void (*const SCREENS[])(const dash_ctx_t *, ssd1306_t *, dash_screen_t *) = {
     // monitoring screens (auto-cycled) ...
     screen_home, screen_sniffer, screen_recorder, screen_throughput, screen_watchdog, screen_uptime,
     // ... then CDC1-summoned tool screens (NOT auto-cycled):
-    screen_macro, screen_baud,
+    screen_macro, screen_baud, screen_sd,
 };
 #define N_SCREENS ((int)(sizeof(SCREENS) / sizeof(SCREENS[0])))
 #define N_MONITOR 6   // screens 0..5 auto-cycle; index 6+ are tool screens reached only via CDC1 nav

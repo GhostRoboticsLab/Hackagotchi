@@ -184,6 +184,13 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   // {"q":"tail"}: request a tail read (SD task does the FatFs read off the hot path) AND return the
   // PREVIOUS read — so send it twice (request, then collect) to verify on-card log content.
   if (!strcmp(q, "tail"))      { static char r[256]; sd_rec_tail_json(r, sizeof r); sd_rec_tail_request(); reply(itf, r); return; }
+  // M4.4 SD explorer (async like tail: returns the PREVIOUS result + requests a fresh one — call twice).
+  if (!strcmp(q, "ls"))        { static char r[480]; sd_ls_json(r, sizeof r); sd_ls_request(); reply(itf, r); return; }
+  if (!strcmp(q, "cat")) {
+    int idx; if (!get_int(line, tok, n, "i", &idx)) { reply(itf, "{\"err\":\"noi\"}\n"); return; }
+    int off = 0; get_int(line, tok, n, "off", &off);
+    static char r[256]; sd_cat_json(r, sizeof r); sd_cat_request(idx, (uint32_t)(off < 0 ? 0 : off)); reply(itf, r); return;
+  }
   if (!strcmp(q, "next"))      { dash_nav_step(+1); write_page(itf); return; }
   if (!strcmp(q, "prev"))      { dash_nav_step(-1); write_page(itf); return; }
   // {"q":"screen"} -> report the current screen + rendered-text attestation (HIL: content + frames-flush).

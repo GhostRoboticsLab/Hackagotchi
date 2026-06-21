@@ -28,6 +28,7 @@ typedef struct {
     bool      logging;
     bool      wedge;
     bool      sd_mounted;
+    uint16_t  log_count;     // M4.4: number of log_*.txt files on the card (cached; SD-EXPLORER screen)
     uint32_t  rx_total;
     uint32_t  hits;
     uint32_t  tp_peak;
@@ -56,5 +57,11 @@ void sd_gate_status_json(char *out, unsigned outsz);
 void sd_rec_status_json(char *out, unsigned outsz);
 void sd_rec_tail_request(void);
 void sd_rec_tail_json(char *out, unsigned outsz);
+
+// M4.4 SD explorer (async, SD-task-owned; request then read on a later call, like the tail).
+void sd_ls_request(void);                       // {"q":"ls"}: list log_*.txt files
+void sd_ls_json(char *out, unsigned outsz);
+void sd_cat_request(int idx, uint32_t off);     // {"q":"cat","i":N,"off":M}: page of log_NNN.txt
+void sd_cat_json(char *out, unsigned outsz);
 
 #endif // HACKAGOTCHI_SD_GATE_H

@@ -123,6 +123,53 @@ static void do_tail_read(void) {
     s_tail_len = br;
 }
 
+// ---- async SD explorer (M4.4): list log files / read a file page. SD-task-owned, off the hot path,
+// same request -> read-on-a-later-call pattern as the tail. ----
+static volatile bool   s_ls_req = false;
+static char            s_ls_buf[400];   // pre-formatted JSON array body: "log_000.txt","log_001.txt",...
+static volatile size_t s_ls_len = 0;
+static volatile int    s_ls_count = 0;  // total log_*.txt files (>= the number listed)
+static int             s_log_count = 0; // cached total, published in the snapshot (SD-EXPLORER screen)
+
+static void do_ls_read(void) {
+    DIR dir; FILINFO fno;
+    size_t o = 0; int n = 0, listed = 0;
+    if (f_findfirst(&dir, &fno, "", "log_*.txt") == FR_OK) {
+        while (fno.fname[0]) {
+            n++;
+            if (listed < 24 && o + 20 < sizeof s_ls_buf) {
+                o += (size_t)snprintf(s_ls_buf + o, sizeof s_ls_buf - o, "%s\"%s\"", listed ? "," : "", fno.fname);
+                listed++;
+            }
+            if (f_findnext(&dir, &fno) != FR_OK) break;
+        }
+        f_closedir(&dir);
+    }
+    s_ls_buf[o] = '\0';
+    s_ls_len = o;
+    s_ls_count = n;
+    s_log_count = n;
+}
+
+static volatile bool     s_cat_req = false;
+static char              s_cat_file[16];  // "log_NNN.txt" built from a numeric index (no path traversal)
+static volatile uint32_t s_cat_off = 0;
+static char              s_cat_buf[160];
+static volatile size_t   s_cat_len = 0;
+static volatile bool     s_cat_eof = false;
+
+static void do_cat_read(void) {
+    FIL f; s_cat_len = 0; s_cat_eof = true;
+    if (f_open(&f, s_cat_file, FA_READ) != FR_OK) return;
+    FSIZE_t sz = f_size(&f);
+    UINT br = 0;
+    if ((FSIZE_t)s_cat_off < sz && f_lseek(&f, s_cat_off) == FR_OK)
+        f_read(&f, s_cat_buf, sizeof s_cat_buf, &br);
+    f_close(&f);
+    s_cat_len = br;
+    s_cat_eof = ((FSIZE_t)s_cat_off + br >= sz);
+}
+
 // Device-side recorder load generator (HIL hook for the SD-during-flash coexistence soak). When on,
 // the SD task synthesizes recorder data every loop -> continuous f_write/f_sync to the card, with NO
 // host UART traffic. A concurrent probe-rs flash soak then measures pure SD-vs-DAP contention, without
@@ -153,6 +200,7 @@ static void publish_snapshot(void) {
         s.rawn = (uint8_t)recorder_copy_raw_tail(&g_rec, sizeof s.raw, s.raw, sizeof s.raw);  // M4 hex view
     }
     s.sd_mounted = s_mounted;
+    s.log_count  = (uint16_t)s_log_count;   // M4.4: cached log_*.txt count for the SD-EXPLORER screen
     s.rec_drop   = uart_bridge_rec_drops();
     snprintf(s.alert, sizeof s.alert, "%s", s_alert);
 
@@ -208,6 +256,7 @@ void sd_gate_task(void *ptr) {
         recorder_init(&g_rec, &REC_HW, PROBE_UART_BAUDRATE);
         recorder_start(&g_rec, (uint32_t)(time_us_64() / 1000ull));   // auto-start logging at boot
         feedback_beep(2000, 60);   // M3.3: a single "alive" chirp at boot (full jingles -> UI rewrite)
+        do_ls_read();              // M4.4: populate the cached log count for the SD-EXPLORER screen
     }
     static uint8_t drain[256];
     for (;;) {
@@ -223,6 +272,8 @@ void sd_gate_task(void *ptr) {
         }
         recorder_tick(&g_rec, now, uart_bridge_rx_last_ms(), uart_bridge_rx_ever());
         if (s_tail_req) { do_tail_read(); s_tail_req = false; }
+        if (s_ls_req)   { do_ls_read();   s_ls_req = false; }   // M4.4 SD explorer (async, off the hot path)
+        if (s_cat_req)  { do_cat_read();  s_cat_req = false; }
         publish_snapshot();          // M3: hand the dashboard + CDC1 a consistent copy of recorder state
         drive_feedback();            // M3.3: map recorder events -> buzzer + NeoPixel (edge-detected)
         feedback_service(now);       // M3.0: apply the latched beep/pixel + buzzer-off, off the hot path
@@ -267,4 +318,32 @@ void sd_rec_tail_json(char *out, unsigned outsz) {
     }
     esc[o] = '\0';
     snprintf(out, outsz, "{\"tail_len\":%u,\"tail\":\"%s\"}\n", (unsigned)s_tail_len, esc);
+}
+
+// ---- M4.4 SD explorer public API (request -> read on a later call, like the tail) ----
+void sd_ls_request(void) { s_ls_req = true; }
+
+void sd_ls_json(char *out, unsigned outsz) {
+    snprintf(out, outsz, "{\"ls\":[%s],\"n\":%d,\"shown\":%d}\n",
+             s_ls_buf, s_ls_count, (s_ls_count > 24 ? 24 : s_ls_count));
+}
+
+void sd_cat_request(int idx, uint32_t off) {
+    if (idx < 0) idx = 0;
+    snprintf(s_cat_file, sizeof s_cat_file, "log_%03d.txt", idx);  // index -> name (no path traversal)
+    s_cat_off = off;
+    s_cat_req = true;
+}
+
+void sd_cat_json(char *out, unsigned outsz) {
+    size_t len = s_cat_len;
+    if (len > 152) len = 152;
+    char esc[160]; size_t o = 0;
+    for (size_t i = 0; i < len && o + 1 < sizeof esc; i++) {
+        char c = s_cat_buf[i];
+        esc[o++] = (c >= 32 && c <= 126 && c != '"' && c != '\\') ? c : '.';
+    }
+    esc[o] = '\0';
+    snprintf(out, outsz, "{\"file\":\"%s\",\"off\":%lu,\"len\":%u,\"eof\":%d,\"data\":\"%s\"}\n",
+             s_cat_file, (unsigned long)s_cat_off, (unsigned)s_cat_len, s_cat_eof ? 1 : 0, esc);
 }
