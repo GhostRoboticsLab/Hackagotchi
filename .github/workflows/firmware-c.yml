@@ -32,9 +32,9 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 45
     env:
-      # The runner's persistent toolchain/SDK cache (same volume PicoInky uses). build_fork.sh's
-      # GCC_DIR / PICO_SDK_PATH defaults already point here; override via Actions vars if the path moves.
-      FWBUILD: ${{ vars.FW_BUILD_DIR || '/Volumes/MacSSD1/DeveloperWorkspace/fw-build' }}
+      # The self-hosted runner's persistent toolchain/SDK cache (pinned Arm GCC + pico-sdk). Set the
+      # FW_BUILD_DIR repo/Actions variable to the runner's path; the fallback below is only a placeholder.
+      FWBUILD: ${{ vars.FW_BUILD_DIR || '/opt/fw-build' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

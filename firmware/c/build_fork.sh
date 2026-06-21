@@ -7,12 +7,16 @@
 #   ./build_fork.sh                 # normal Gate-1 image  -> build/hackagotchi_probe.uf2
 #   ADVERSARIAL_STALL_MS=50 ./build_fork.sh   # adversarial 50 ms-stall variant (separate image)
 #
-# Overridable env: GCC_DIR, PICO_SDK_PATH, BUILD_DIR.
+# Overridable env: FW_BUILD_DIR, GCC_DIR, PICO_SDK_PATH, BUILD_DIR.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-GCC_DIR="${GCC_DIR:-/Volumes/MacSSD1/DeveloperWorkspace/fw-build/arm-gnu-toolchain-13.3.rel1-darwin-arm64-arm-none-eabi}"
-PICO_SDK_PATH="${PICO_SDK_PATH:-/Volumes/MacSSD1/DeveloperWorkspace/fw-build/micropython/lib/pico-sdk}"
+# Per-machine toolchain root. Don't bake an absolute path into the repo: set FW_BUILD_DIR (or
+# GCC_DIR / PICO_SDK_PATH directly) in your env, or drop a gitignored build_fork.local.sh next to this.
+[ -f "$HERE/build_fork.local.sh" ] && . "$HERE/build_fork.local.sh"
+FW_BUILD_DIR="${FW_BUILD_DIR:-$HOME/fw-build}"
+GCC_DIR="${GCC_DIR:-$FW_BUILD_DIR/arm-gnu-toolchain-13.3.rel1-darwin-arm64-arm-none-eabi}"
+PICO_SDK_PATH="${PICO_SDK_PATH:-$FW_BUILD_DIR/micropython/lib/pico-sdk}"
 BUILD_DIR="${BUILD_DIR:-$HERE/build}"
 ADVERSARIAL_STALL_MS="${ADVERSARIAL_STALL_MS:-0}"
 ADVERSARIAL_AT_DAP_PRIO="${ADVERSARIAL_AT_DAP_PRIO:-OFF}"
