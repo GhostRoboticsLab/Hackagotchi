@@ -4,6 +4,31 @@ All notable changes to the Hackagotchi C probe firmware (`firmware/c`) are docum
 Format follows [Keep a Changelog](https://keepachangelog.com/); versions are the firmware tags
 `v<x.y.z>`. The semver is compiled into the binary and reported by `{"q":"status"}` → `"ver"`.
 
+## [Unreleased]
+
+### OLED UI overhaul — the cat + Spectre the GhostLabs ghost (M-UI-1..5)
+A full dashboard glow-up where **every flicker of personality is a literal readout of a real
+probe/recorder signal** — all within R1 (idle-priority render, snapshot-only reads) and the
+camera-free text-attestation model.
+
+- **Graphics engine:** `ssd1306_blit()` — a clipped 1-bit sprite blit (OR / ANDNOT / XOR) with a
+  pico-free, host-unit-tested core (`tests/m_ui/blit_test.c`) and an ASCII-art sprite pipeline
+  (`tools/spr_gen.py` → `sprites.gen.h`). Sprites are flash-resident (~0 RAM).
+- **Persistent status bar** on every screen (REC / SD glyphs + a ghost pip), attested as a `BAR …`
+  line; `DASH_MAX_LINES` 6→8 so a new token can never silently drop a literal fact. New `hud_gauge_h()`.
+- **Spectre, the ghost** — its state *is* the target board's soul: absent / live / pale (wedged) /
+  glitch (SD fault) / exorcised, bound to the recorder snapshot, attested `g:<state>`.
+- **Cat moods** — sleep / content / hunting / alert from existing signals, attested `cat:<mood>`;
+  flying-data particle speed scales with live throughput.
+- **Resurrection tally** — wedge→recover + fault counts, edge-counted in the 50 Hz SD task (not the
+  4 Hz render loop, which could miss a fast edge) and shown on UPTIME.
+- **Companion interaction over CDC1** (no physical button): `pet`, `summon`/`banish`, `exorcise`
+  (a host flasher fires it after a clean reflash), `ghost` (mute → pure-instrument cluster), `theme`
+  (motion density); plus a ghostly dither screen-wipe between screens.
+
+Footprint: text +3.3 KB, bss +164 B total. Static-analysis gate green; the blit host unit test and an
+extended `screen_hil.py` attest the new surfaces.
+
 ## [1.0.0] - 2026-06-21
 
 First public release. A debug probe that is *also* a black-box flight recorder and a reactive,

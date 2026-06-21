@@ -88,6 +88,10 @@ Send `{"q":"<cmd>", ...}\n`; you get one JSON line back.
 | | `{"q":"setmacro","i":N,"s":"..."}` | set macro N (persisted to SD) |
 | | `{"q":"baud","v":N}` | change the target-UART baud (validated set; persisted) |
 | **Feedback** | `{"q":"beep"}` / `{"q":"led",...}` / `{"q":"pixel",...}` | buzzer / status LEDs / NeoPixel |
+| **Companion** | `{"q":"pet"}` | a happy cat beat (heart + chirp) |
+| | `{"q":"summon"}` / `{"q":"banish"}` | force the ghost present / absent (also lets tests drive it) |
+| | `{"q":"exorcise"}` | the exorcism dissolve — a host flasher fires it after a clean reflash |
+| | `{"q":"ghost","on":0/1}` / `{"q":"theme","n":0/1}` | mute the character layer (pure-instrument) / motion density |
 | **Maintenance** | `{"q":"bootsel"}` | reset to BOOTSEL for a hands-free reflash |
 | | `{"q":"wd_arm"}` / `{"q":"wd_reset"}` | software watchdog control |
 
@@ -96,15 +100,20 @@ There are also test/diagnostic hooks used by the HIL suite (`uloop_on/off`, `rec
 </details>
 
 <details>
-<summary><b>🐾 The dashboard</b> — a cat mascot, 6 auto-cycling monitor screens, 3 summonable tool screens</summary>
+<summary><b>🐾 The dashboard</b> — a cat + a ghost, 6 auto-cycling monitor screens, 3 summonable tool screens</summary>
 
 ```
-HOME (cat)   SNIFFER        RECORDER     THROUGHPUT    WATCHDOG       UPTIME
- /\_/\       UART RX LOG    BLACK BOX     ▁▂▄▆█▆▄▂      last freeze    + heap
-( o.o )      live tail      log NNN       bytes/s       frame          uptime
+HOME         SNIFFER        RECORDER     THROUGHPUT    WATCHDOG       UPTIME
+ /\_/\  .-.  UART RX LOG    BLACK BOX     ▁▂▄▆█▆▄▂      last freeze    + heap
+( o.o )(o o) live tail      log NNN       bytes/s       frame          rev/flt
 ```
 
-The six **monitor** screens auto-cycle. Three **tool** screens (MACRO / BAUD / SD-EXPLORER) are summoned over CDC1 and stay put (excluded from auto-cycle), so the panel never parks on a menu. The buzzer + NeoPixel give event feedback (wedge = alarm + red, recovery = chirp + green), all driven off the DAP hot path.
+Two characters, and **every flicker of personality is a literal readout of a real signal**:
+
+- **The cat** is your bench familiar. Its mood is the bench at a glance — **sleeping** (idle), **content** (target chatting), **hunting** (data really flowing; particles + tail speed up with throughput), **alert** (target wedged or SD fault). Pet it with `{"q":"pet"}`.
+- **Spectre, the ghost**, *is the target board's soul* — **absent** (no target), **solid** (alive), **hollow/pale** (wedged), **torn** (recorder fault), and **exorcised** (dissolves when the host reflashes). A status pip rides the top-right corner of every screen.
+
+The six **monitor** screens auto-cycle (a ghostly dither wipe between them); three **tool** screens (MACRO / BAUD / SD-EXPLORER) are summoned over CDC1 and stay put. The buzzer + NeoPixel add event feedback (summon chirp, wedge alarm + red, recovery gasp + green) — all driven off the DAP hot path. Prefer a pure instrument cluster? `{"q":"ghost","on":0}`.
 
 </details>
 
