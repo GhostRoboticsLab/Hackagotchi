@@ -1,23 +1,31 @@
 # Hackagotchi 🛠️🐾
 
-**A black-box flight recorder for dev boards that go dark — that also debugs them, and keeps you company while it works.**
+<div align="center">
+
+**The debug probe with a soul — and tools up its sleeves.**
 
 [![Firmware CI](https://github.com/GhostRoboticsLab/Hackagotchi/actions/workflows/firmware-c.yml/badge.svg)](https://github.com/GhostRoboticsLab/Hackagotchi/actions/workflows/firmware-c.yml)
 [![Firmware: MIT](https://img.shields.io/badge/firmware%2Fc-MIT-blue.svg)](firmware/c/LICENSE)
 [![Project: GPL-3.0-or-later](https://img.shields.io/badge/project-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/badge/firmware-v1.0.0-green.svg)](https://github.com/GhostRoboticsLab/Hackagotchi/releases)
 
-One **Seeed XIAO RP2040**, one firmware image, **three tools running at the same time** — without ever corrupting a flash in progress:
+<!-- HERO RENDER: export the Blender hero to docs/media/hero.png (recommend ~1280px wide, transparent or dark bg) and uncomment the <img> below.
+<img src="docs/media/hero.png" width="640" alt="Hackagotchi — XIAO RP2040: CMSIS-DAP debug probe + UART black-box recorder + reactive OLED companion" />
+-->
 
-- 🔌 **A real SWD debug probe** — a fork of [`debugprobe`](https://github.com/raspberrypi/debugprobe): halt, erase, and reflash a wedged target with OpenOCD / probe-rs, *whatever state its firmware is in*.
-- 📼 **A UART black-box recorder** — continuously logs the target's serial to microSD (session headers, heartbeats, a freeze-frame on a wedge), so a board that goes dark still has its **last words**.
-- 🐾 **A reactive OLED dashboard** — a Tamagotchi-style cat that reacts to your target: live logs, throughput, a watchdog freeze-frame. The probe is *alive*, not a dongle.
+</div>
 
-> 🎯 **The whole point** is doing all three on one **single-core** RP2040 with **0 DAP transfer stalls under load** — the dashboard and SD writer never steal a cycle from a flash in progress. That invariant (**R1**) is *proven on hardware, not asserted*: see [`docs/release-readiness.md`](docs/release-readiness.md).
+A fork of Raspberry Pi's official [`debugprobe`](https://github.com/raspberrypi/debugprobe) firmware — drop-in with OpenOCD, probe-rs, and the Pico SDK — that doesn't just flash your target, it *watches* it. One **Seeed XIAO RP2040**, one firmware image, **three simultaneous roles**:
+
+- 🔌 **A real SWD debug probe** — halt, erase, and reflash a wedged target with OpenOCD / probe-rs, *whatever state its firmware is in*. Standards-compliant CMSIS-DAP; enumerates as **"Hackagotchi Probe (CMSIS-DAP)"**.
+- 📼 **A UART black-box recorder** — continuously logs the target's serial to microSD (session headers, heartbeats, a freeze-frame on a wedge), so a board that goes dark still leaves its **last words**.
+- 🐾 **A reactive OLED that's alive, not a dongle** — a cat and a ghost whose every flicker is a *literal readout of your target*. The cat is the bench at a glance; **Spectre, the ghost, IS the target board's soul** — it wakes when the board talks, goes hollow when it wedges, dissolves when you reflash. The probe and recorder feed a face that shows the board's pulse. (This layer is evolving fast.)
+
+> 🎯 All three on **one single-core RP2040**, with **0 DAP transfer stalls under load** — the dashboard and SD writer never steal a cycle from a flash in progress. That invariant (**R1**) is *proven on hardware, not asserted*: see [`docs/release-readiness.md`](docs/release-readiness.md).
 
 ## ⚡ Flash it in 30 seconds
 
-No toolchain needed — just `picotool` (`brew install picotool`). Grab `hackagotchi_probe.uf2` from the **[latest release](https://github.com/GhostRoboticsLab/Hackagotchi/releases)**, then:
+No toolchain needed — just `picotool` (`brew install picotool`). Grab `hackagotchi_probe.uf2` from the **[latest release](https://github.com/GhostRoboticsLab/Hackagotchi/releases)**, drop into BOOTSEL, and load:
 
 ```bash
 # BOOTSEL the XIAO: hold B, tap R, release B  ->  an RPI-RP2 drive mounts
@@ -27,7 +35,9 @@ picotool load -x hackagotchi_probe.uf2          # -x = run after loading
 printf '{"q":"status"}\n' > /dev/cu.usbmodemXXXX  # -> {"fw":"Hackagotchi","ver":"1.0.0",...}
 ```
 
-> Already running an older build? You don't even need the button — send `{"q":"bootsel"}` to the control port and it drops to BOOTSEL on its own. Building from source instead? → [`docs/c-firmware-build.md`](docs/c-firmware-build.md).
+That's it — the cat wakes up and the probe is live.
+
+<sub>Already running an older build? You don't even need the chord — send `{"q":"bootsel"}` to the control port and it drops to BOOTSEL on its own. Building from source instead? → [`docs/c-firmware-build.md`](docs/c-firmware-build.md).</sub>
 
 <sub>**Two firmwares live here.** The shipping product is the **C firmware** in [`firmware/c/`](firmware/c) (everything below). [`firmware/micropython/`](firmware/micropython) is the original MicroPython v1 prototype, kept for reference.</sub>
 
@@ -45,7 +55,7 @@ printf '{"q":"status"}\n' > /dev/cu.usbmodemXXXX  # -> {"fw":"Hackagotchi","ver"
 | **Buzzer** (PWM) | **GP29** |
 | **WS2812 NeoPixel** (status LED) | data **GP12**, power **GP11** |
 
-**No physical button** — GP27 became SWDIO, so navigation and tools are driven over USB (CDC1, below). A deliberate trade: an extra debug pin is worth more than a menu button when the device *is* a debugger.
+**No physical button** — GP27 became SWDIO, so navigation and tools are driven over USB (CDC1, below). A deliberate trade: when the device *is* a debugger, an extra debug pin beats a menu button.
 
 </details>
 
@@ -99,7 +109,7 @@ There are also test/diagnostic hooks used by the HIL suite (`uloop_on/off`, `rec
 
 </details>
 
-<details>
+<details open>
 <summary><b>🐾 The dashboard</b> — a cat + a ghost, 6 auto-cycling monitor screens, 3 summonable tool screens</summary>
 
 ```
@@ -108,12 +118,14 @@ HOME         SNIFFER        RECORDER     THROUGHPUT    WATCHDOG       UPTIME
 ( o.o )(o o) live tail      log NNN       bytes/s       frame          rev/flt
 ```
 
-Two characters, and **every flicker of personality is a literal readout of a real signal**:
+**Every flicker of personality is a literal readout of a real signal** — two characters, no whimsy that isn't load-bearing:
 
-- **The cat** is your bench familiar. Its mood is the bench at a glance — **sleeping** (idle), **content** (target chatting), **hunting** (data really flowing; particles + tail speed up with throughput), **alert** (target wedged or SD fault). Pet it with `{"q":"pet"}`.
-- **Spectre, the ghost**, *is the target board's soul* — it **dozes** when the target is quiet and **wakes solid** when it talks over the UART tap (GP0/GP1), goes **hollow/pale** when it wedges, **torn** on a recorder fault, and is **exorcised** (dissolves) when the host reflashes. A status pip rides the top-right corner of every screen. (Ghost liveness follows the target's *serial* — an SWD-only attach with no UART traffic shows the dozing ghost.)
+- **The cat** is your bench familiar, its mood the bench at a glance: **sleeping** (idle), **content** (target chatting), **hunting** (data really flowing — particles + tail speed scale with throughput), **alert** (target wedged or SD fault). Pet it with `{"q":"pet"}`.
+- **Spectre, the ghost**, *is the target board's soul*. It **dozes** when the target is quiet and **wakes solid** when it talks over the UART tap (GP0/GP1), goes **hollow/pale** when it wedges, **torn** on a recorder fault, and is **exorcised** (dissolves) when the host reflashes. A status pip rides the top-right corner of every screen. (Ghost liveness follows the target's *serial* — an SWD-only attach with no UART traffic shows the dozing ghost.)
 
-The six **monitor** screens auto-cycle; three **tool** screens (MACRO / BAUD / SD-EXPLORER) are summoned over CDC1 and stay put. The buzzer + NeoPixel add event feedback (summon chirp, wedge alarm + red, recovery gasp + green) — all driven off the DAP hot path. Prefer a pure instrument cluster? `{"q":"ghost","on":0}`.
+The six **monitor** screens auto-cycle; three **tool** screens (MACRO / BAUD / SD-EXPLORER) are summoned over CDC1 and stay put (excluded from auto-cycle). The buzzer + NeoPixel add event feedback (summon chirp, wedge alarm + red, recovery gasp + green) — all driven off the DAP hot path. Want a pure instrument cluster? `{"q":"ghost","on":0}`.
+
+This character layer is under heavy active development and expanding fast — the cat and Spectre are just the first faces of the bench.
 
 </details>
 
