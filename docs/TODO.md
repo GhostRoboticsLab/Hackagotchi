@@ -22,12 +22,15 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
   openocd 200/200, adversarial-50ms 1000/1000 (+3000 stretch), all 0 fails/stalls under the corrected
   stdout check; OLED liveness operator-attested; **heap_4 kept**. 5-lens verification = PASS_WITH_BLOCKERS;
   blockers closed (F1-3 verify-guard bug fixed, provenance banner, doc). See GATE_RESULTS.md.
-- [ ] **Gate 1 — deferred robustness (on hardware return):** GP0→GP1 loopback to machine-capture the
-  OLED counter (monotonic) + heap series + adversarial `stall=` build-id; flash the at-DAP-priority
-  variant (`ADVERSARIAL_AT_DAP_PRIO=ON`, compile-verified) for a genuine contention test; then flip
-  the gate doc to unconditional PASS.
-- [ ] **Gate 2:** add the 2nd CDC (`cdc_dual_ports`, IAD `0xEF/0x02/0x01`); `gate2_cdc.py`
-  round-trip 100/100; node mapping stable across 3 replug + 1 reboot.
+- [x] **Gate 1 — deferred robustness** — **CLOSED** *(2026-06-20, GATE_RESULTS Close-out wf_96721d04)*:
+  at-DAP-priority genuine contention machine-captured (`prio=1`, `stall_us≈50000`, dashboard `n`
+  307→2189, 0 fails); the gate doc is upgraded to unconditional PASS for the contention claim.
+- [x] **Gate 2 core** — **PASS** *(2026-06-20)*: 2nd CDC (IAD `0xEF/0x02/0x01`), DAP still binds,
+  `gate2_cdc.py` round-trip 100/100, exactly two nodes.
+- [~] **Gate 2 deferrals (M5)** — tooling built + (b) firmware-proven: `gate2_cdc.py --live-uart` PASS
+  (CDC0 UART loopback 0-drop + CDC1 answered + 0 stalls concurrent with a DAP soak); `--replug-rounds`
+  added for (a). Pending the operator bench run: (a) physical 3× replug + 1 reboot, and a (b) re-run on a
+  power-cycled target so the flash also completes clean. See `docs/release-readiness.md`.
 
 ## After gates pass — build the firmware (engineering-plan M1–M5)
 - [x] **M1 probe + bridge + CDC1 control + reliability core** — **COMPLETE / PASS** *(2026-06-20)*,
@@ -140,7 +143,11 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     Confirmatory clean soak (both boards power-cycled): PASS 13/300 (4.3%), 0 stalls, recorder flawless.
     Finding: this target board re-glitches its QSPI under sustained hammering (power-cycle between long runs);
     orthogonal to the probe firmware (0 stalls every run).
-- [ ] M5 polish + tagged release (.uf2 + .elf): CI green on all gates, license/NOTICE bundle, flashing guide.
+- [~] **M5 polish + tagged release** (.uf2 + .elf) — IN PROGRESS *(2026-06-21)*: version compiled in
+  (`{"q":"status"}` `ver`), licensing/NOTICE bundle + SPDX, CHANGELOG, `docs/release-readiness.md`
+  evidence index, CI ships NOTICE/LICENSE. "CI green" = the AUTOMATED checks CI can run (build +
+  `analyze.sh` static analysis); the HIL gates are operator-attested on the release image (CI cannot run
+  hardware). Remaining: README/CONTRIBUTING upgrade, the operator Gate-2 bench run, then `git push` + dispatch.
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,
   tighter analyzers, RTT observability.
 
@@ -153,10 +160,11 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
   PR; propose an umbrella LICENSE; pursue the co-maintainer path.
 
 ## Housekeeping
-- [ ] Add a **LICENSE** (org choice) before any public/commercial release. *(third-party deps documented
-  in `firmware/c/THIRD-PARTY-NOTICES.md` — all permissive MIT/BSD-3/Apache; project's own license still TBD.)*
+- [x] **LICENSE chosen** *(2026-06-20)*: project GPL-3.0-or-later (root `LICENSE`); the `firmware/c/`
+  subtree MIT (`firmware/c/LICENSE`). Third-party deps (all permissive MIT/BSD-3/Apache) attributed in
+  both `THIRD-PARTY-NOTICES.md`; SPDX tags on first-party sources.
 - [ ] Vendor `sdcard.py` into `firmware/micropython/lib/` (currently a noted gap).
-- [ ] Add the **org remote** when the URL is provided, then `git push -u origin main`.
+- [x] **Org remote** set: `git@github.com:GhostRoboticsLab/Hackagotchi.git`.
 - [x] CI/CD: `.github/workflows/firmware-c.yml` — manual-dispatch build (setup.sh + build_fork.sh,
   pinned Arm GCC 13.3 via the self-hosted runner's fw-build cache) + the `analyze.sh` static-analysis
   gate + .uf2/.elf artifacts + optional Release (`engineering-plan.md` §7). *Untested until the org

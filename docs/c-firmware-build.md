@@ -30,9 +30,11 @@ bumping the upstream base, diff each overlay file against the new upstream versi
 |---|---|
 | SWD (locked) | **SWCLK=GP26 (D0), SWDIO=GP27 (D1)** — adjacent, SWDIO=SWCLK+1 (PIO requirement); reclaims D0 LED/ADC + D1 button |
 | UART tap (bridge) | GP0 TX / GP1 RX (uart0) |
-| OLED + RTC | I2C1 SDA=GP6 / SCL=GP7 (OLED @0x3C) |
-| microSD (not yet driven) | SPI GP2/3/4 + CS GP28 |
-| Status LED | GP25 (onboard blue) |
+| OLED | I2C1 SDA=GP6 / SCL=GP7 (OLED @0x3C, FM+ 1 MHz, single-owner — the PCF8563 RTC was dropped) |
+| microSD — SPI0 (black box) | SCK=GP2 / MOSI=GP3 / MISO=GP4 / CS=GP28 |
+| Buzzer (PWM) | GP29 |
+| WS2812 NeoPixel (status) | data=GP12 / power=GP11 |
+| USB heartbeat LED | GP25 (onboard blue) |
 
 ## Prerequisites (already on the build machine / self-hosted runner)
 
@@ -46,8 +48,8 @@ bumping the upstream base, diff each overlay file against the new upstream versi
 
 ```bash
 cd firmware/c
-./setup.sh            # clone debugprobe-v2.2.3 (+ FreeRTOS) into upstream/ (gitignored)
-./build_fork.sh       # -> build/hackagotchi_probe.uf2 (+ .elf)
+./setup.sh                      # clone debugprobe-v2.2.3 (+ FreeRTOS) into upstream/ (gitignored)
+VERSION=1.0.0 ./build_fork.sh   # -> build/hackagotchi_probe.uf2 (+ .elf); VERSION is compiled in + reported by {"q":"status"} "ver"
 ```
 
 Gate-test variants (separate images; don't overwrite the product `build/` — use `BUILD_DIR=`):
@@ -67,7 +69,8 @@ strings build/hackagotchi_probe.elf | grep 'Hackagotchi Control'
 
 ## Flash
 
-The XIAO is the probe; reflashing it needs **USB BOOTSEL** (no software self-reset path):
+The XIAO is the probe; reflashing it needs **USB BOOTSEL** — either the button gesture below, or
+`{"q":"bootsel"}` over CDC1 (a software reset-to-bootloader, `reset_usb_boot`) for a hands-free reflash:
 
 ```bash
 # Put the XIAO in BOOTSEL: hold B, tap R, release B  ->  RPI-RP2 mounts
@@ -89,6 +92,10 @@ are report-only. CI runs this as a gate (`.github/workflows/firmware-c.yml`).
 ## Gates
 
 Hardware-in-the-loop validation lives in `firmware/c/tests/gates/` with results in
-`tests/gates/GATE_RESULTS.md`. Gate 0 (probe flashes a target) and Gate 1 (OLED task survives a
-sustained flash soak) PASS; Gate 2 (2nd CDC: 2 nodes + JSON round-trip) firmware is flash-ready and
-awaits hardware validation (`gate2_cdc.py`).
+`tests/gates/GATE_RESULTS.md`. **Gate 0** (probe flashes a target), **Gate 1** (OLED task survives a
+sustained flash soak, 0 stalls — at-DAP-priority contention closed), and **Gate 2** (2nd CDC: 2 nodes,
+DAP binds, 100/100 JSON round-trip) all **PASS**. Milestones M1–M4 (reliability core, SD black box,
+dashboard, full tool UI) are HIL-verified; per-milestone results are under `tests/m1`…`tests/m4`, and
+the release-image attestation (CI-automated vs HIL-attested) is consolidated in
+[`release-readiness.md`](release-readiness.md). The HIL gates cannot run in CI — only the build +
+`analyze.sh` static-analysis gate do.

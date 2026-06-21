@@ -1,0 +1,100 @@
+# Release readiness — `fw-c-v1.0.0`
+
+The single evidence index for the C probe firmware release. It draws the line between what **CI can
+automate** and what is **operator-attested on real hardware**, and pins each green to the *tagged
+image* (not a per-increment dev build).
+
+> ⚠️ **The HIL gates cannot run in CI.** Every gate/milestone test needs a physical probe + target
+> (+ for some, an SD card / SWD fixtures). CI (`.github/workflows/firmware-c.yml`, self-hosted runner)
+> runs **only** the build + the `analyze.sh` static-analysis gate. A green CI badge therefore means
+> "builds + passes static analysis," **not** "the gates ran." The gates below were run by hand on the
+> v1.0.0 image and recorded here.
+
+## Release identity
+
+| | |
+|---|---|
+| Tag | `fw-c-v1.0.0` |
+| Version (compiled in) | `1.0.0` — reported live by `{"q":"status"}` → `"ver"` |
+| Base | fork of `raspberrypi/debugprobe` @ `debugprobe-v2.2.3` (single-core FreeRTOS) |
+| Local build (attested image) | `text 170604 / bss 84140` · `.uf2` sha256 `7d1a2b50…27047` · `.elf` sha256 `5883d054…ee3c0` |
+| Canonical artifact | the CI Release `.uf2`/`.elf` (rebuilt from this tagged source on the runner; functionally identical) |
+
+## Section A — CI-automated (`firmware-c.yml`)
+
+| Check | Tool | Result on v1.0.0 |
+|---|---|---|
+| Build | CMake + pinned Arm GCC 13.3 + pico-sdk 2.2.0 | **PASS** (clean) |
+| Static-analysis gate | `analyze.sh` (GCC `-fanalyzer` + cppcheck) | **PASS** — 0 analyzer / 0 style on the pristine TUs (`cdc1_control.c`, `hackagotchi_dashboard.c`); only report-only upstream-inherited warnings |
+| Artifacts + Release | uploads `.uf2`+`.elf`; optional Release ships **+ THIRD-PARTY-NOTICES.md + LICENSE** | wired |
+
+Host unit tests (`ring_test`, `recorder_test`) are pure-host and **CI-able** (no hardware); they pass
+locally (below) and a CI job for them is a tracked follow-up.
+
+## Section B — HIL-attested on the v1.0.0 image (NOT run in CI)
+
+Ports: CDC1/control `/dev/cu.usbmodem21204`, CDC0/bridge `/dev/cu.usbmodem21202`. Runner:
+`…/PicoInky/.venv/bin/python`. Device flashed with the v1.0.0 `.uf2` (`{"q":"status"}` → `ver=1.0.0`).
+
+| Suite | Proves | On v1.0.0 | Result |
+|---|---|---|---|
+| Version provenance | device self-reports its release | ✅ re-run | **PASS** — `fw=Hackagotchi, ver=1.0.0` |
+| `m1/ring_test` (host) | SPSC ring (FIFO/wrap/drop/fence) | ✅ re-run | **PASS** 35/35 |
+| `m2/recorder_test` (host) | recorder core state machine | ✅ re-run | **PASS** 31/31 |
+| `m1/jsmn_hil` | JSON dispatch, strstr-trap reject, frag reassembly, nav | ✅ re-run | **PASS** (nav assertion hardened — async read) |
+| `m1/uart_bridge_hil` | CDC0↔UART IRQ→ring→drain, 0 drops | ✅ re-run | **PASS** 55 B, 0 drops |
+| `m1/crashbox_hil` | HardFault + malloc-fail captured, survive reboot | ✅ re-run | **PASS** |
+| `m1/watchdog_hil` | SW watchdog catches a wedged TUD | ✅ re-run | **PASS** |
+| `m3/screen_hil` | screen self-attestation (shows==loops) | ✅ re-run | **PASS** |
+| `m3/feedback_hil` | buzzer/NeoPixel event transitions | ✅ re-run | **PASS** |
+| `m4/hex_hil` | SNIFFER ASCII↔hex render | ✅ re-run | **PASS** (gutter assertion hardened — row-wrap) |
+| `m4/macro_hil` | macro sender loops back | ✅ re-run | **PASS** |
+| `m4/baud_hil` | runtime baud change + loopback at new rate | ✅ re-run | **PASS** |
+| `m4/sd_hil` | SD explorer ls/cat | ✅ re-run | **PASS** |
+| `m4/config_hil` | settings persist across reboot | ✅ re-run | **PASS** |
+| **Gate 2 deferral (b)** `gate2_cdc.py --live-uart` | CDC0 live UART concurrent with a DAP flash soak | ✅ re-run | **PASS** — loopback 125/125, `urx_drop`/`utx_drop` +0, CDC1 answered 125/125, **0 stalls** ¹ |
+| Gate 0 | probe halts/erases/flashes a target | cited | **PASS** 5/5 — `GATE_RESULTS.md` (prior image; needs SWD target + fixtures to re-run) |
+| Gate 1 | OLED task survives sustained flash, 0 stalls; at-DAP-prio contention | cited | **PASS** — `GATE_RESULTS.md` (1000/1000 + self-attesting 300; prior image) |
+| Gate 2 core | 2 nodes, DAP binds, 100/100 JSON | cited + corroborated | **PASS** — `GATE_RESULTS.md`; on v1.0.0 the probe enumerates as `Hackagotchi Probe (CMSIS-DAP)` and `--live-uart` exercised both CDCs + DAP live |
+| M2 coexistence soak (R1) | 0 stalls under continuous SD-write + DAP flash | cited | **PASS** — `M4_RESULTS.md` 13/300 (4.3%), **0 stalls** (M4 image; v1.0.0 differs only by the `ver` string, so not re-run) |
+
+¹ During the `--live-uart` run the **target board re-glitched its QSPI** (flash `fails=300`, still
+**0 stalls**) — the documented target fragility, orthogonal to the probe. The firmware concurrency claim
+(UART byte-perfect + USB never wedged + 0 stalls while SWD traffic is active) is proven; a re-run on a
+power-cycled target (so the flash *also* completes clean) is the only thing left for an unambiguous close.
+
+## Open operator-gated items (the only things between here and a clean tag)
+
+1. **Gate 2 deferral (a)** — node-map stability across **3 physical replug + 1 host reboot**. Tooling
+   is built: `gate2_cdc.py --replug-rounds 4` (re-discovers role by behavior each round). Needs a human
+   at the bench (physical replug/reboot).
+2. **Gate 2 deferral (b) clean re-run** — power-cycle the target, then re-run `--live-uart` so the DAP
+   flash also lands `fails≈0` alongside the (already-proven) 0-drop UART + 0 stalls.
+3. *(optional rigor)* re-run Gate 0/1 + `coexist_soak.py 300` on the v1.0.0 image (cited above from the
+   functionally-identical M4 image).
+
+## Carried caveats (unchanged from M4)
+
+- Retryable (0-stall) DAP transfer errors rise under the *artificial* continuous-max-SD soak; ~0 in
+  real use (the target is halted during a real flash). **Host-load-sensitive** — run soaks on an idle host.
+- Some target boards re-glitch their QSPI under sustained flash hammering (still 0 stalls throughout) —
+  power-cycle the target between long soak campaigns. Probe firmware unaffected.
+
+## Reproduce
+
+```bash
+cd firmware/c && ./setup.sh && VERSION=1.0.0 BUILD_DIR=/tmp/hg-v100 ./build_fork.sh && ./analyze.sh
+# flash /tmp/hg-v100/hackagotchi_probe.uf2 (picotool load -x, or {"q":"bootsel"} then load), then:
+VENV=…/PicoInky/.venv/bin/python
+$VENV tests/m1/jsmn_hil.py; $VENV tests/m1/uart_bridge_hil.py; $VENV tests/m1/crashbox_hil.py; $VENV tests/m1/watchdog_hil.py
+$VENV tests/m3/screen_hil.py; $VENV tests/m3/feedback_hil.py
+$VENV tests/m4/hex_hil.py; $VENV tests/m4/macro_hil.py; $VENV tests/m4/baud_hil.py; $VENV tests/m4/sd_hil.py; $VENV tests/m4/config_hil.py
+$VENV tests/gates/gate2_cdc.py --live-uart --secs 150       # deferral (b)
+$VENV tests/gates/gate2_cdc.py --replug-rounds 4            # deferral (a) — operator-driven
+cc -I src -pthread tests/m1/ring_test.c -o /tmp/ring && /tmp/ring
+cc -I src tests/m2/recorder_test.c src/recorder.c -o /tmp/rec && /tmp/rec
+```
+
+> Run HIL suites **standalone on a settled device** (not back-to-back after the reboot-inducing
+> crashbox/watchdog tests, and not on a loaded host) — the UART-loopback tests share device state.
+> See the `run-hil-gate` skill for the bench runbook.
