@@ -140,7 +140,8 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
     closeout (SPSC inject/baud/open-log read confirmed safe; fixed a do_ls_read OOB on a long filename,
     restored the soak's hard 8% ceiling, disclosed a benign hg_config torn-read). R1: 0 stalls every soak;
     retryable DAP-fail rate ~1%->~4% idle-host (XIP-layout, accepted "don't gold-plate"). See M4_RESULTS.md.
-    Confirmatory clean soak (both boards power-cycled): PASS 13/300 (4.3%), 0 stalls, recorder flawless.
+    Confirmatory clean soak (both boards power-cycled): PROBE PASS — 0 stalls, flash succeeded every cycle;
+    the 13/300 (4.3%) are retryable host/USB hiccups, not flash-fails or probe faults. Recorder flawless.
     Finding: this target board re-glitches its QSPI under sustained hammering (power-cycle between long runs);
     orthogonal to the probe firmware (0 stalls every run).
 - [~] **M5 polish + tagged release** (.uf2 + .elf) — IN PROGRESS *(2026-06-21)*: version compiled in

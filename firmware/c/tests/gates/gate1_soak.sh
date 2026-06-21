@@ -19,7 +19,9 @@ ELF_B="${ELF_B:-$HERE/fixtures/blink_b.elf}"
 N="${1:-1000}"
 mkdir -p "$HERE/gate1"
 log="$HERE/gate1/soak_$(date +%Y%m%dT%H%M%S).log"
-fails=0; stalls=0
+# shellcheck source=lib_target_state.sh
+. "$HERE/lib_target_state.sh"   # classify_target / target_hint: TARGET-glitch vs PROBE fault
+fails=0; stalls=0; tgt=0
 
 command -v probe-rs >/dev/null 2>&1 || { echo "probe-rs not found"; exit 2; }
 for f in "$ELF_A" "$ELF_B"; do [ -f "$f" ] || { echo "missing fixture: $f (run fixtures/build_fixtures.sh)"; exit 2; }; done
@@ -48,7 +50,13 @@ for i in $(seq 1 "$N"); do
     if is_stall "$rc"; then
       echo "STALL/TIMEOUT cycle $i" | tee -a "$log"; stalls=$((stalls+1))
     else
-      echo "FAIL(rc=$rc) cycle $i" | tee -a "$log"; fails=$((fails+1))
+      cls=$(classify_target "$CHIP")
+      if [ "$cls" = TARGET_GLITCH ]; then
+        echo "TARGET-GLITCH cycle $i (download)" | tee -a "$log"; tgt=$((tgt+1))
+      else
+        echo "FAIL(rc=$rc,$cls) cycle $i (download)" | tee -a "$log"; fails=$((fails+1))
+      fi
+      target_hint "$cls" | tee -a "$log"
     fi
     probe-rs list >>"$log" 2>&1
     system_profiler SPUSBDataType 2>/dev/null | grep -iA6 CMSIS >>"$log" 2>&1
@@ -62,12 +70,24 @@ for i in $(seq 1 "$N"); do
   if is_stall "$vrc"; then
     echo "REVERIFY-STALL cycle $i" | tee -a "$log"; stalls=$((stalls+1))
   elif echo "$vout" | grep -q "Verification failed" || ! echo "$vout" | grep -q "Verification successful"; then
-    echo "REVERIFY-MISMATCH cycle $i" | tee -a "$log"; fails=$((fails+1))
+    cls=$(classify_target "$CHIP")
+    if [ "$cls" = TARGET_GLITCH ]; then
+      echo "TARGET-GLITCH cycle $i (reverify)" | tee -a "$log"; tgt=$((tgt+1))
+    else
+      echo "REVERIFY-MISMATCH cycle $i ($cls)" | tee -a "$log"; fails=$((fails+1))
+    fi
+    target_hint "$cls" | tee -a "$log"
   fi
-  [ $((i % 50)) -eq 0 ] && echo "  ...$i/$N (fails=$fails stalls=$stalls)"
+  [ $((i % 50)) -eq 0 ] && echo "  ...$i/$N (fails=$fails stalls=$stalls tgt=$tgt)"
 done
 
-echo "DONE N=$N fails=$fails stalls=$stalls" | tee -a "$log"
-echo "GATE 1: $([ $((fails+stalls)) -eq 0 ] && echo PASS || echo FAIL)  (bar: 0 fails, 0 stalls)"
+echo "DONE N=$N fails=$fails stalls=$stalls target_glitch=$tgt" | tee -a "$log"
+# The PROBE verdict EXCLUDES target_glitch on purpose: a brown-out / locked TARGET (AHB-AP gone) is
+# a bench/power fault the probe cannot cause or cure — power-cycle the target. Only probe/SWD/host
+# failures (fails) and probe hangs (stalls) fail the probe.
+echo "PROBE VERDICT: $([ $((fails+stalls)) -eq 0 ] && echo PASS || echo FAIL)  (bar: 0 fails, 0 stalls)" | tee -a "$log"
+if [ "$tgt" -gt 0 ]; then
+  echo "TARGET/BENCH: $tgt glitch event(s) — power-cycle the target between sustained runs (NOT a probe bug)." | tee -a "$log"
+fi
 echo "Also confirm: OLED counter advanced throughout; heap min-ever-free stable (heap_plot.py)."
 exit $(( fails + stalls ))

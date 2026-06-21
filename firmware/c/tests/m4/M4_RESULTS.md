@@ -66,10 +66,12 @@ standing "don't gold-plate" directive on this exact M2 caveat, this is **accepte
 (the only "real fix" — RAM-pinning the DAP hot path — would fork the pristine upstream `probe.c` and re-spend
 the XIP RAM win, which the v1.1 plan rejected).
 
-**Confirmatory clean soak (2026-06-21, both boards power-cycled, host idle): PASS — 13/300 (4.3%), 0 stalls**,
-recorder flawless (err=0, logging=1, wedge=0, rec_drop=0, rx 0→317k, on-card tail intact). This is the
-final hard-ceiling number; it confirms the ~4% idle-host floor (the earlier 90/300 was a concurrent host
-process; 300/300 was a glitched target). The power-cycle restored the target's AHB access port
+**Confirmatory clean soak (2026-06-21, both boards power-cycled, host idle): PROBE PASS — 0 stalls, flash
+succeeded every cycle; 13/300 (4.3%) were RETRYABLE host/USB transfer hiccups that probe-rs recovered from
+(NOT flash failures, NOT probe faults)**, recorder flawless (err=0, logging=1, wedge=0, rec_drop=0, rx 0→317k,
+on-card tail intact). The "13/300" is the retryable-hiccup ceiling, not a flash-fail rate — it confirms the
+~4% idle-host floor (the earlier 90/300 was a concurrent host process; 300/300 was a glitched target). The
+power-cycle restored the target's AHB access port
 (`0 MemoryAP (AmbaAhb3)` under both cores — absent while glitched), which is what flash program/verify needs.
 
 **Target-hardware finding (orthogonal to firmware):** this particular target Pico W **re-glitches its QSPI

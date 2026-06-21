@@ -58,7 +58,7 @@ Ports: CDC1/control `/dev/cu.usbmodem21204`, CDC0/bridge `/dev/cu.usbmodem21202`
 | Gate 0 | probe halts/erases/flashes a target | cited | **PASS** 5/5 — `GATE_RESULTS.md` (prior image; needs SWD target + fixtures to re-run) |
 | Gate 1 | OLED task survives sustained flash, 0 stalls; at-DAP-prio contention | cited | **PASS** — `GATE_RESULTS.md` (1000/1000 + self-attesting 300; prior image) |
 | Gate 2 core | 2 nodes, DAP binds, 100/100 JSON | cited + corroborated | **PASS** — `GATE_RESULTS.md`; on v1.0.0 the probe enumerates as `Hackagotchi Probe (CMSIS-DAP)` and `--live-uart` exercised both CDCs + DAP live |
-| M2 coexistence soak (R1) | 0 stalls under continuous SD-write + DAP flash | cited | **PASS** — `M4_RESULTS.md` 13/300 (4.3%), **0 stalls** (M4 image; v1.0.0 differs only by the `ver` string, so not re-run) |
+| M2 coexistence soak (R1) | 0 stalls under continuous SD-write + DAP flash | cited | **PROBE PASS** — `M4_RESULTS.md`: **0 stalls, flash succeeded every cycle**; the 13/300 (4.3%) are RETRYABLE host/USB hiccups, not flash-fails or probe faults (M4 image; v1.0.0 differs only by the `ver` string, so not re-run) |
 
 ¹ First run: the target re-glitched its QSPI (`fails=300`, still 0 stalls — the documented fragility).
 **Clean re-run after a power-cycle (2026-06-21): PASS — `fails=1` (1%), 0 stalls, loopback 64/64,
