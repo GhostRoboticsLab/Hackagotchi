@@ -25,5 +25,11 @@ config.json
 docs/private/
 firmware/c/build_fork.local.sh
 
+# Social-card / render source assets (large raw generations kept local, not in the repo).
+# Only the web-ready docs/media/social-preview.jpg (<1 MB) is committed.
+img_assets/
+repository-open-graph-template.png
+docs/media/social-preview.png
+
 # OS
 .DS_Store

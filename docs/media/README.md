@@ -2,6 +2,20 @@
 
 Drop README / launch media here.
 
+## `social-preview.jpg` — the GitHub social card ✅ (in repo)
+
+The Open Graph card GitHub serves as the link-unfurl image (on GitHub itself, plus HN /
+Reddit / Mastodon / Slack / Discord).
+
+- **1280×640** (2:1), JPEG, **under 1 MB** — GitHub rejects social-preview uploads over 1 MB.
+- Generated with Nano Banana 2 from `repository-open-graph-template.png`; the AI sparkle
+  watermark was painted out and the image cropped/resized to spec.
+- **To apply it:** repo **Settings → General → Social preview → Edit → Upload an image** →
+  pick `docs/media/social-preview.jpg`. This is a **one-time manual upload** — GitHub does
+  *not* read the file from the repo automatically.
+- The full-res source generations (and the de-watermarked master) are kept local under
+  `img_assets/` (gitignored), not committed, to keep the repo lean.
+
 ## `hero.png` — the README hero render (placeholder slot)
 
 The top of [`../../README.md`](../../README.md) has a **commented-out** `<img>` waiting for this file:
@@ -22,4 +36,3 @@ Until then the slot renders nothing — no broken-image icon.
 ## Other assets to add here later
 
 - `hero.gif` — the looping cat + ghost reaction loop (the launch centerpiece): idle → throughput → wedge → exorcise-on-reflash. Keep it under ~5 MB so it inlines on GitHub.
-- `social-preview.png` — 1280×640, set via **Settings → Social preview** (controls the link unfurl card on HN / Reddit / Mastodon / Slack / Discord).
