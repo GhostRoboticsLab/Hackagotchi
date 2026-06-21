@@ -9,9 +9,12 @@
 [![Project: GPL-3.0-or-later](https://img.shields.io/badge/project-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/badge/firmware-v1.0.0-green.svg)](https://github.com/GhostRoboticsLab/Hackagotchi/releases)
 
-<!-- HERO RENDER: export the Blender hero to docs/media/hero.png (recommend ~1280px wide, transparent or dark bg) and uncomment the <img> below.
+<!-- HERO RENDER: export the Blender hero to docs/media/hero.png (recommend ~1280px wide, transparent or dark bg) and uncomment the <img> below; then drop the social card that follows it.
 <img src="docs/media/hero.png" width="640" alt="Hackagotchi — XIAO RP2040: CMSIS-DAP debug probe + UART black-box recorder + reactive OLED companion" />
 -->
+
+<!-- Until the Blender hero lands, the social card doubles as the top banner. -->
+<img src="docs/media/social-preview.jpg" width="820" alt="Hackagotchi — a CMSIS-DAP debug probe, UART black-box recorder, and reactive OLED companion on one Seeed XIAO RP2040" />
 
 </div>
 
