@@ -210,6 +210,8 @@ void sd_recgen_set(bool on) { s_recgen = on; }
 // are belt-and-braces (the real protection on single-core RP2040 is the seq-retry against preemption).
 static volatile uint32_t s_snap_seq = 0;
 static rec_snapshot_t    s_snap;            // the published copy
+static uint16_t          s_revived = 0;     // M-UI-5: wedge->recover edges, counted here (50 Hz) so a
+static uint16_t          s_faults  = 0;     //   fast edge isn't missed by the 4 Hz dashboard; published.
 
 static void publish_snapshot(void) {
     rec_snapshot_t s;
@@ -228,6 +230,8 @@ static void publish_snapshot(void) {
     s.sd_mounted = s_mounted;
     s.log_count  = (uint16_t)s_log_count;   // M4.4: cached log_*.txt count for the SD-EXPLORER screen
     s.rec_drop   = uart_bridge_rec_drops();
+    s.revived    = s_revived;   // M-UI-5: resurrection tally (edge-counted in drive_feedback)
+    s.faults     = s_faults;
     snprintf(s.alert, sizeof s.alert, "%s", s_alert);
 
     s_snap_seq++;                              // -> odd (write in progress)
@@ -255,16 +259,18 @@ bool dash_get_rec_snapshot(rec_snapshot_t *out) {
 // events; the buzzer fires on EDGES only (wedge alarm / recovery chirp / SD-fault buzz / trigger blip).
 static void drive_feedback(void) {
     if (!s_mounted) return;
-    static bool     first = true, last_wedge = false, last_err = false;
+    static bool     first = true, last_wedge = false, last_err = false, last_rx = false;
     static uint32_t last_hits = 0, last_color = 0xFFFFFFFFu;
     recorder_status_t st;
     recorder_get_status(&g_rec, &st);
     bool err = (st.last_err != REC_ERR_NONE);
+    bool rx_seen = (st.rx_total > 0);
 
     if (!first) {
-        if (st.wedge && !last_wedge)      feedback_beep(700, 500);    // target wedged -> alarm
-        else if (!st.wedge && last_wedge) feedback_beep(2200, 80);    // recovered -> chirp
-        if (err && !last_err)             feedback_beep(500, 700);    // SD write/full fault -> buzz
+        if (rx_seen && !last_rx)          feedback_beep(1700, 70);    // M-UI-5: ghost summon (the target's first words)
+        if (st.wedge && !last_wedge)      feedback_beep(700, 500);    // target wedged -> alarm (death rattle)
+        else if (!st.wedge && last_wedge) { feedback_beep(2200, 80); s_revived++; }  // recovered -> chirp (gasp)
+        if (err && !last_err)             { feedback_beep(500, 700);  s_faults++;  }  // SD write/full fault -> buzz
         if (st.hits > last_hits)          feedback_beep(2600, 70);    // trigger-term hit -> blip
     }
     uint32_t color = (st.wedge || err) ? 0x400000u : (st.logging ? 0x001000u : 0u);  // red / dim green / off
@@ -272,7 +278,7 @@ static void drive_feedback(void) {
         feedback_pixel((uint8_t)(color >> 16), (uint8_t)(color >> 8), (uint8_t)color);
         last_color = color;
     }
-    last_wedge = st.wedge; last_err = err; last_hits = st.hits; first = false;
+    last_wedge = st.wedge; last_err = err; last_hits = st.hits; last_rx = rx_seen; first = false;
 }
 
 void sd_gate_task(void *ptr) {

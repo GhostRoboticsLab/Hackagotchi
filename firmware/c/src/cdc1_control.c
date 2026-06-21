@@ -220,6 +220,18 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   // {"q":"screen","n":N} -> jump to screen N (clamped by the dashboard), then report.
   if (!strcmp(q, "screen"))    { int v; if (get_int(line, tok, n, "n", &v)) dash_nav_to(v); write_screen(itf); return; }
   if (!strcmp(q, "hex"))       { bool m = dash_hex_toggle(); char r[20]; snprintf(r, sizeof r, "{\"hex\":%d}\n", m ? 1 : 0); reply(itf, r); return; }
+  // M-UI-5 companion interaction (the cat + ghost respond to the operator; there is no physical button).
+  if (!strcmp(q, "pet"))      { dash_pet(); feedback_beep(1760, 80); reply(itf, "{\"pet\":1}\n"); return; }
+  if (!strcmp(q, "summon"))   { dash_ghost_summon(1); reply(itf, "{\"ghost\":\"summon\"}\n"); return; }
+  if (!strcmp(q, "banish"))   { dash_ghost_summon(0); reply(itf, "{\"ghost\":\"banish\"}\n"); return; }
+  if (!strcmp(q, "exorcise")) { dash_exorcise(); feedback_beep(1200, 160); reply(itf, "{\"exorcise\":1}\n"); return; }
+  // {"q":"ghost","on":0/1} mutes/unmutes the whole character layer (pure-instrument <-> companion);
+  // {"q":"ghost"} with no "on" returns the ghost to AUTO (clears a summon/banish override). Echoes char state.
+  if (!strcmp(q, "ghost")) {
+    int on; if (get_int(line, tok, n, "on", &on)) dash_char_enable(on); else dash_ghost_summon(-1);
+    char r[28]; snprintf(r, sizeof r, "{\"char\":%d}\n", dash_char_enabled()); reply(itf, r); return;
+  }
+  if (!strcmp(q, "theme")) { int v = 1; get_int(line, tok, n, "n", &v); dash_theme(v); char r[24]; snprintf(r, sizeof r, "{\"theme\":%d}\n", v ? 1 : 0); reply(itf, r); return; }
   // M4.2 macro sender: list the configured macros / send macro i (TEXT + CRLF) out the target UART.
   if (!strcmp(q, "macros")) {
     static char r[160]; int o = snprintf(r, sizeof r, "{\"macros\":[");

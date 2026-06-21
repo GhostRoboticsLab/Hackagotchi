@@ -34,6 +34,8 @@ typedef struct {
     uint32_t  tp_peak;
     uint32_t  rec_drop;      // bytes the recorder ring dropped (uart_bridge_rec_drops)
     int       last_err;      // rec_err_t: 0=none, 1=SD full, 2=write error
+    uint16_t  revived;       // M-UI-5: wedge->recover transitions since boot (target resurrections)
+    uint16_t  faults;        // M-UI-5: recorder SD-fault edges since boot (the ghost's death count)
     char      file[16];      // current log filename (bounded copy, never a live pointer)
     char      alert[24];     // last recorder alert text (trigger hit / fault badge)
     char      tail[80];      // printable tail of the freeze ring (live-UART view)

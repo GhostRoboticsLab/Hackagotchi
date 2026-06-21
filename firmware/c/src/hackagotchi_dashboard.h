@@ -46,6 +46,14 @@ bool dash_hex_toggle(void);      // M4: toggle the SNIFFER hex view; returns the
 bool dash_hex_mode(void);        // M4: current SNIFFER hex-view mode
 void dash_macro_mark(int i);     // M4.2: mark macro i as the last sent (for the MACRO screen)
 
+// --- M-UI-5 companion interaction (CDC1-posted intents, consumed + clamped by the dashboard) ---
+void dash_pet(void);             // {"q":"pet"}: a happy cat beat (heart overlay + chirp)
+void dash_ghost_summon(int on);  // {"q":"summon"}=1 / {"q":"banish"}=0 / {"q":"ghost"}=-1 (auto): force ghost state
+void dash_char_enable(int on);   // {"q":"ghost","on":0/1}: character layer off=pure-instrument / on=companion
+int  dash_char_enabled(void);    // current character-layer state (for the CDC1 reply echo)
+void dash_exorcise(void);        // {"q":"exorcise"}: the exorcism dissolve (host fires it after a clean flash)
+void dash_theme(int dense);      // {"q":"theme","n":0/1}: calm=reduced-motion / dense=full motion
+
 // --- M3.1 self-attestation: copy the EXACT rendered text of the current frame (title + lines, joined by
 // '\n') into out[]; returns the current screen index. The text IS what was drawn to the OLED this frame
 // (the framework draws the same text model it publishes), so a host test verifies content with no camera.

@@ -95,6 +95,19 @@ def main():
         chk("g:" in txt, f"screen {n}: ghost vitals attest (g:<state> token present)")  # M-UI-3
         chk(txt.count("\n") + 1 <= DASH_MAX_LINES + 1, f"screen {n}: attestation within cap (no silent drop)")
 
+    # M-UI-5: companion verbs. summon/banish force the ghost vitals deterministically (no real wedge
+    # needed), so the override is HIL-provable; pet / theme / ghost-mute are acknowledged.
+    ctrl('{"q":"screen","n":0}'); time.sleep(0.3)
+    ctrl('{"q":"banish"}'); time.sleep(0.4)
+    chk("g:absent" in ctrl('{"q":"screen"}').get("text", ""), "banish -> g:absent")
+    ctrl('{"q":"summon"}'); time.sleep(0.4)
+    chk("g:absent" not in ctrl('{"q":"screen"}').get("text", ""), "summon -> ghost present")
+    ctrl('{"q":"ghost"}'); time.sleep(0.3)   # clear override -> AUTO
+    chk(ctrl('{"q":"pet"}').get("pet") == 1, "pet acknowledged")
+    chk(ctrl('{"q":"theme","n":0}').get("theme") == 0, "theme calm set")
+    ctrl('{"q":"theme","n":1}')              # restore dense
+    chk("char" in ctrl('{"q":"ghost","on":1}'), "ghost layer toggle acknowledged")
+
     sc2 = ctrl('{"q":"screen"}')
     print(f"loops={sc2.get('loops')} shows={sc2.get('shows')} dstack={sc2.get('dstack')}")
     chk(sc2.get("shows", 0) > sh0, "show-success counter climbing (frames flush to panel)")

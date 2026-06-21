@@ -68,6 +68,25 @@ bool dash_hex_mode(void)   { return s_hex_mode; }
 static volatile int32_t s_macro_last = -1;
 void dash_macro_mark(int i) { s_macro_last = i; }
 
+// --- M-UI-5 companion interaction intents (posted by CDC1/TUD, consumed by the render loop) ---
+static volatile int32_t  s_ghost_force  = -1;  // -1 auto · 0 banish (absent) · 1 summon (present)
+static volatile int32_t  s_char_on      = 1;   // character layer: 1 companion (default) · 0 pure-instrument
+static volatile int32_t  s_theme_dense  = 1;   // 1 dense (default) · 0 calm (reduced motion)
+static volatile uint32_t s_pet_until    = 0;   // ms deadline for the pet reaction (absolute clock)
+static volatile int32_t  s_exorcise_req = 0;   // set by CDC1; armed into the frame countdown by the loop
+static int               s_exorcise_frames = 0;// render-loop-owned exorcism dissolve countdown (frames)
+
+void dash_pet(void)            { s_pet_until = (uint32_t)(time_us_64() / 1000ull) + 1500u; }
+void dash_ghost_summon(int on) { __atomic_store_n(&s_ghost_force, on, __ATOMIC_RELAXED); }
+void dash_char_enable(int on)  { __atomic_store_n(&s_char_on, on ? 1 : 0, __ATOMIC_RELAXED); }
+int  dash_char_enabled(void)   { return __atomic_load_n(&s_char_on, __ATOMIC_RELAXED); }
+void dash_exorcise(void)       { __atomic_store_n(&s_exorcise_req, 1, __ATOMIC_RELAXED); }
+void dash_theme(int dense)     { __atomic_store_n(&s_theme_dense, dense ? 1 : 0, __ATOMIC_RELAXED); }
+
+static bool char_on(void)     { return __atomic_load_n(&s_char_on, __ATOMIC_RELAXED) != 0; }
+static bool theme_dense(void) { return __atomic_load_n(&s_theme_dense, __ATOMIC_RELAXED) != 0; }
+static bool petting(void)     { return (uint32_t)(time_us_64() / 1000ull) < s_pet_until; }
+
 // --- derived dashboard state (updated once per frame, read by the screen fns) ---
 typedef struct {
     rec_snapshot_t snap;
@@ -110,7 +129,10 @@ static void aline(dash_screen_t *s, const char *fmt, ...) {  // record an attest
 // absent; target silent (wedged) -> pale; recorder can't archive it (SD fault) -> glitch; else alive.
 enum { GH_ABSENT = 0, GH_LIVE, GH_PALE, GH_GLITCH };
 static int ghost_state(const dash_ctx_t *c) {
-    if (c->snap.rx_total == 0) return GH_ABSENT;
+    int f = __atomic_load_n(&s_ghost_force, __ATOMIC_RELAXED);   // M-UI-5: summon/banish override
+    if (f == 0) return GH_ABSENT;                                                 // banished
+    if (f == 1) return c->snap.wedge ? GH_PALE : c->snap.last_err ? GH_GLITCH : GH_LIVE;  // summoned (real sub-state)
+    if (c->snap.rx_total == 0) return GH_ABSENT;                                  // auto, from the target's soul:
     if (c->snap.wedge)         return GH_PALE;
     if (c->snap.last_err != 0) return GH_GLITCH;
     return GH_LIVE;
@@ -128,7 +150,7 @@ static void statusbar(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     int g = ghost_state(c);
     if (c->snap.logging)    ssd1306_blit(d, glyph_rec, glyph_rec_W, glyph_rec_H, 100, 0, SSD1306_BLIT_OR);
     if (c->snap.sd_mounted) ssd1306_blit(d, glyph_sd,  glyph_sd_W,  glyph_sd_H,  110, 0, SSD1306_BLIT_OR);
-    if (g != GH_ABSENT && !((g == GH_PALE || g == GH_GLITCH) && (c->frame / 3u) % 2u == 0))
+    if (char_on() && g != GH_ABSENT && !((g == GH_PALE || g == GH_GLITCH) && (c->frame / 3u) % 2u == 0))
         ssd1306_blit(d, ghost_pip, ghost_pip_W, ghost_pip_H, 119, 0, SSD1306_BLIT_OR);
     aline(s, "BAR %c%c g:%s u%lu", c->snap.logging ? 'R' : '-', c->snap.sd_mounted ? 'S' : '-',
           ghost_name(g), (unsigned long)c->up_s);
@@ -182,6 +204,16 @@ static void hud_gauge_h(ssd1306_t *d, int x, int y, int w, int h, int pct) {
     int fill = (w - 2) * pct / 100;
     if (fill > 0) ssd1306_draw_square(d, x + 1, y + 1, fill, h - 2);
 }
+
+#ifndef HG_NO_SCREEN_WIPE
+// M-UI-5: a ghostly screen-wipe — tile-XOR the checker dither across the frame. One frame = a static
+// flash between screens; no scratch buffer (XOR is reversible). Compile out with -DHG_NO_SCREEN_WIPE.
+static void screen_wipe(ssd1306_t *d) {
+    for (int y = 0; y < 64; y += 8)
+        for (int x = 0; x < 128; x += 8)
+            ssd1306_blit(d, dither8, dither8_W, dither8_H, x, y, SSD1306_BLIT_XOR);
+}
+#endif
 
 // M-UI-4: the cat's mood is a readout of the bench, derived ONLY from existing dash_ctx fields (no new
 // cross-task reads). ALERT when the target is in trouble; HUNTING when data is really flowing; CONTENT
@@ -263,11 +295,14 @@ static void draw_cat(ssd1306_t *d, int mood, uint32_t tick, const char *last_typ
         ssd1306_draw_empty_square(d, bx, by, 21, 11);
         ssd1306_draw_line(d, bx + 14, by + 10, cx + 2, cy + 2);
         ssd1306_draw_string(d, bx + 3, by + 2, 1, last_type);
-        // flying data particles — speed + count scale with live throughput (telemetry hidden in delight)
-        uint32_t sp = (tp_now >= 200u) ? 17u : (tp_now >= 50u) ? 11u : 6u;
-        ssd1306_draw_pixel(d, 45 + (int)((tick * sp) % 40u), 26);
-        ssd1306_draw_pixel(d, 45 + (int)(((tick + 3u) * sp) % 40u), 42);
-        if (mood == CAT_HUNTING) ssd1306_draw_pixel(d, 45 + (int)(((tick + 6u) * sp) % 40u), 34);
+        // flying data particles — speed + count scale with live throughput (telemetry hidden in delight);
+        // they are the "dense" motion layer, so the calm theme hides them (M-UI-5).
+        if (theme_dense()) {
+            uint32_t sp = (tp_now >= 200u) ? 17u : (tp_now >= 50u) ? 11u : 6u;
+            ssd1306_draw_pixel(d, 45 + (int)((tick * sp) % 40u), 26);
+            ssd1306_draw_pixel(d, 45 + (int)(((tick + 3u) * sp) % 40u), 42);
+            if (mood == CAT_HUNTING) ssd1306_draw_pixel(d, 45 + (int)(((tick + 6u) * sp) % 40u), 34);
+        }
     } else {
         bool blink = (tick % 40u) >= 37u;
         if (blink) {
@@ -285,12 +320,19 @@ static void draw_cat(ssd1306_t *d, int mood, uint32_t tick, const char *last_typ
             ssd1306_draw_string(d, cx - 12 + (int)z * 4, cy - 8 - (int)z * 3, 1, z == 0 ? "z" : "Z");
         }
     }
+    if (petting()) ssd1306_blit(d, heart8, heart8_W, heart8_H, cx + 10, cy - 11, SSD1306_BLIT_OR);  // M-UI-5 pet
 }
 
 // M-UI-3: blit the 16x16 ghost in its current vitals state at (x,y). Absent target -> nothing drawn.
 // Glitch flickers (urgent/transient); live + pale are steady (the hollow pale shape already reads as
 // "in trouble"). Pure OR-blit over a dark gutter; the eye-voids are baked into the sprites as off-pixels.
 static void draw_ghost_vitals(const dash_ctx_t *c, ssd1306_t *d, int x, int y) {
+    if (s_exorcise_frames > 0) {                       // M-UI-5: exorcism — an expanding ring + blink-out
+        int g = 10 - s_exorcise_frames; if (g < 0) g = 0;
+        ssd1306_draw_empty_square(d, x - g, y - g, 16 + 2 * g, 16 + 2 * g);
+        if (s_exorcise_frames & 1) ssd1306_blit(d, ghost_live, ghost_live_W, ghost_live_H, x, y, SSD1306_BLIT_XOR);
+        return;
+    }
     int g = ghost_state(c);
     if (g == GH_ABSENT) return;
     if (g == GH_GLITCH && (c->frame / 2u) % 2u == 0) return;   // tear flicker
@@ -312,8 +354,10 @@ static void screen_home(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     ssd1306_draw_string(d, 4, 32, 1, c->snap.logging ? "REC" : "off");
     if (c->snap.alert[0]) { ssd1306_draw_string(d, 28, 32, 1, "!"); }
     int mood = cat_mood(c);
-    draw_cat(d, mood, c->frame, "RX", c->tp_now);
-    draw_ghost_vitals(c, d, 4, 46);   // M-UI-3: Spectre, bottom-left — paired diagonally with the cat
+    if (char_on()) {                  // M-UI-5: companion layer on by default; {"q":"ghost","on":0} mutes it
+        draw_cat(d, mood, c->frame, "RX", c->tp_now);
+        draw_ghost_vitals(c, d, 4, 46);   // M-UI-3: Spectre, bottom-left — paired diagonally with the cat
+    }
     // attestation summary
     aline(s, "rx %s", rx); aline(s, "up %s", up);
     aline(s, "%s%s", c->snap.logging ? "REC" : "off", c->snap.alert[0] ? " !" : "");
@@ -421,8 +465,11 @@ static void screen_uptime(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     char sub[22];
     if (up >= 86400u) snprintf(sub, sizeof sub, "%ud up  heap %uK", (unsigned)(up / 86400u), (unsigned)(c->heap / 1024u));
     else              snprintf(sub, sizeof sub, "heap %uK free", (unsigned)(c->heap / 1024u));
+    char tally[22]; snprintf(tally, sizeof tally, "rev %u  flt %u",
+                             (unsigned)c->snap.revived, (unsigned)c->snap.faults);
+    ssd1306_draw_string(d, 8, 40, 1, tally);   // M-UI-5: resurrection tally (edge-counted in the SD task)
     ssd1306_draw_string(d, 8, 50, 1, sub);
-    aline(s, "%s", hms); aline(s, "%s", sub);
+    aline(s, "%s", hms); aline(s, "%s", tally); aline(s, "%s", sub);
 }
 
 // 6 (tool) — MACRO SENDER: the configured macros; sent over CDC1 {"q":"macro","i":N}. Marks the last sent.
@@ -537,12 +584,16 @@ void dashboard_task(void *ptr) {
     static dash_screen_t scr;
     static rec_snapshot_t last_good;
     int idx = 0;
+#ifndef HG_NO_SCREEN_WIPE
+    int wipe_frames = 0, last_idx = -1;   // M-UI-5: screen-wipe state (function-local, persists across the loop)
+#endif
     uint32_t last_cycle = (uint32_t)(time_us_64() / 1000ull);
     TickType_t wake = xTaskGetTickCount();
 
     for (;;) {
         uint32_t now = (uint32_t)(time_us_64() / 1000ull);
         g_dash_counter++;
+        if (__atomic_exchange_n(&s_exorcise_req, 0, __ATOMIC_RELAXED)) s_exorcise_frames = 10;  // M-UI-5: arm exorcism
 
 #if ADVERSARIAL_STALL_MS > 0
         uint64_t _t0 = time_us_64();
@@ -578,11 +629,17 @@ void dashboard_task(void *ptr) {
         idx = next_index(idx, now, &last_cycle);
         ctx.idx = idx;
         g_dash_screen = idx;
+#ifndef HG_NO_SCREEN_WIPE
+        if (idx != last_idx) { if (char_on()) wipe_frames = 1; last_idx = idx; }   // M-UI-5: arm screen-wipe
+#endif
 
         memset(&scr, 0, sizeof scr);
         if (ok) {
             ssd1306_clear(&disp);
             SCREENS[idx](&ctx, &disp, &scr);
+#ifndef HG_NO_SCREEN_WIPE
+            if (wipe_frames > 0) { screen_wipe(&disp); wipe_frames--; }   // M-UI-5: ghostly transition flash
+#endif
             // Tick the show-success counter ONLY when the panel ACKed the burst (ssd1306_show >= 0) — so a
             // NAKing/absent OLED (or a 1 MHz bus a board's pullups can't sustain) gives shows < loops, the
             // genuine dark-panel / FM+ integrity detector (per the M3 closeout audit).
@@ -592,6 +649,7 @@ void dashboard_task(void *ptr) {
             SCREENS[idx](&ctx, &disp, &scr);   // still publish attestation even if the panel is absent
         }
         publish_attest(&scr, idx);
+        if (s_exorcise_frames > 0) s_exorcise_frames--;   // M-UI-5: advance the exorcism dissolve
 
         g_dash_stack_free = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
         xTaskDelayUntil(&wake, pdMS_TO_TICKS(DASH_REFRESH_MS));

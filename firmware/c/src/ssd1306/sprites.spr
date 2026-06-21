@@ -106,3 +106,26 @@
 ##.###.###.###.#
 #..##..##..##..#
 @end
+
+; ---- M-UI-5 interaction sprites ----
+@sprite heart8         ; pet reaction (a happy heart over the cat)
+.##..##.
+########
+########
+########
+.######.
+..####..
+...##...
+........
+@end
+
+@sprite dither8        ; 8x8 checker, tile-XOR'd for the ghostly screen-wipe transition
+#.#.#.#.
+.#.#.#.#
+#.#.#.#.
+.#.#.#.#
+#.#.#.#.
+.#.#.#.#
+#.#.#.#.
+.#.#.#.#
+@end
