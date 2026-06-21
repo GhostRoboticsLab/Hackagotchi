@@ -101,5 +101,6 @@ jobs:
             firmware/c/THIRD-PARTY-NOTICES.md \
             firmware/c/LICENSE
 
-  # TODO (after M1 introduces portable logic): a host-tests job (Ceedling/Unity) for the UART ring
-  # buffer, wedge-detector state machine, JSON control parser, and log-rotation — runs with no probe.
+  # The portable-logic host tests (SPSC ring, recorder wedge/heartbeat machine, sprite blit) run in the
+  # separate, GitHub-HOSTED host-tests.yml (push/PR) — they need no probe, so they don't belong on this
+  # manual self-hosted build job. Each runs its verify-the-verifier break build too, so the check can fail.

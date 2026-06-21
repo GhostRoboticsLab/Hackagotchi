@@ -1,7 +1,7 @@
 #!/bin/sh
 # pre-commit — keep per-developer AI coding-assistant context files out of the shared repo.
 #
-# These files (CLAUDE.md, GEMINI.md, .cursorrules, …) are personal: everyone has their own style
+# These files (CLAUDE.md, the .claude/ dir, GEMINI.md, .cursorrules, …) are personal: everyone has their own style
 # and may use a different assistant, so they are .gitignore'd. .gitignore stops the accidental
 # `git add`; this hook also rejects a deliberate `git add -f`, so they can't be committed by mistake.
 #
@@ -14,7 +14,7 @@
 staged=$(git diff --cached --name-only --diff-filter=ACMR)
 
 blocked=$(printf '%s\n' "$staged" | grep -E \
-  '(^|/)CLAUDE\.md$|(^|/)CLAUDE\.local\.md$|(^|/)GEMINI\.md$|(^|/)\.cursorrules$|(^|/)\.windsurfrules$|(^|/)\.aider[^/]*$|^\.github/copilot-instructions\.md$')
+  '(^|/)CLAUDE\.md$|(^|/)CLAUDE\.local\.md$|(^|/)\.claude/|(^|/)GEMINI\.md$|(^|/)\.cursorrules$|(^|/)\.windsurfrules$|(^|/)\.aider[^/]*$|^\.github/copilot-instructions\.md$')
 
 if [ -n "$blocked" ]; then
     echo "pre-commit: refusing to commit per-developer AI assistant file(s):" >&2

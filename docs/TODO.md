@@ -152,6 +152,68 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,
   tighter analyzers, RTT observability.
 
+## Next — post-v1.0.0 backlog (ranked, 2026-06-22)
+
+Prioritised from a survey→propose→rank pass over the current tree (value / effort / R1-risk / fit). Item
+**#1 (host-tests CI) is DONE** — see Housekeeping above. The rest, best-first:
+
+- [ ] **(2) DAP transfer/health telemetry in `{"q":"status"}`** — value HIGH / effort S / risk MED *(touches the DAP path → re-gate before shipping)*.
+  A monotonic `dap_xfers` + a coarse last-active stamp, incremented with a single non-blocking `++` at the
+  DAP service site in our overlay `main.c` (lower-risk alternative: the `tud_hid_set_report_cb` we already
+  shadow, which sits at TUD prio *above* DAP), published via the existing seqlock/snapshot and surfaced in
+  `write_status()` + the host CLI. Gives the headline "0 stalls" invariant a firmware-side witness so every
+  soak is self-cross-checkable (xfers advanced by the expected count). **Must re-gate** before merge: Gate 1
+  + `coexist_soak.py 300`, 0 stalls *and* unchanged retryable rate. Follow-up (nobody proposed it): a
+  companion `dap_retries` counter + a soak that ASSERTS the retryable rate stays under the documented ceiling
+  — turns the central carried caveat into a guarded bound instead of an ad-hoc per-soak observation.
+- [ ] **(3) BOM + narrative build/flash guide** — value HIGH / effort M / risk low *(pure docs)*.
+  `docs/build-a-hackagotchi.md`: a real Bill of Materials (XIAO RP2040, expansion board, SSD1306 OLED,
+  microSD, passive buzzer, WS2812, SWD/UART jumpers, filament — with qty/links/approx cost), a step-by-step
+  assembly procedure, the consolidated pin map, and an **as-shipped vs case-docs reconciliation** callout:
+  the case docs (`case/HACKAGOTCHI_CASE.md`, `CAT_ENCLOSURE_SPEC.md`) still enclose the *dropped* PCF8563 RTC
+  + CR1220 coin cell + user button, GP27 became SWDIO, and the `.scad` models no cutout for the NeoPixel the
+  firmware drives. This is the single biggest *physical*-reproducibility blocker today.
+- [ ] **(4) Close Gate 2 deferral (a) — node-map stability** — value MED / effort S / risk low *(needs bench)*.
+  The only genuinely-incomplete gate item in the tree (every other verdict is PASS; this one has had just one
+  incidental cycle effectively pass). Tooling already exists: run `tests/gates/gate2_cdc.py --replug-rounds 4`
+  (3× operator replug + 1 reboot, re-discover the control port by behaviour each time), record the verdict in
+  `GATE_RESULTS.md` + `release-readiness.md`. Cheapest un-attested→attested conversion available.
+- [ ] **(5) Cut a tagged v1.1** for the shipped-but-unreleased M-UI overhaul — value HIGH / effort M / risk low.
+  The Spectre ghost + sprite engine is the README's headline ("a debug probe with a soul"), but the only
+  downloadable release (v1.0.0) predates ALL of it — anyone flashing the latest release gets a product that
+  doesn't match the README. Date `CHANGELOG [Unreleased]` into a v1.1 entry, write
+  `docs/RELEASE_NOTES_v1.1.md`, fold in the small README doc fixes (the undocumented `{"q":"fb"}`; the
+  `{"q":"ghost"}` no-arg auto-reset behaviour), re-attest build+analyze + relevant HIL on the candidate image,
+  publish via the existing release job. Plan the tag carefully (the immutability bit bit v1.0.0 once; expect a
+  local-build/hand-attest path while the self-hosted runner is offline). Optional hardening: a
+  `verify-release.sh` that rebuilds from the tag and diffs the .uf2 sha256 against the published artifact (the
+  "byte-identical rebuild" claim is currently unscripted).
+- [ ] **(6) Host-CLI convenience wrappers + packaging** — value MED / effort M / risk low *(host-only, can't touch R1)*.
+  `host/hackagotchi_ctl.py` wraps only ~6 of ~30 CDC1 verbs. Add thin subcommands for the high-value ones that
+  today require hand-echoing JSON: `bootsel` (THE documented hands-free reflash path — handle the no-reply
+  re-enumeration), `baud`, `sd ls/cat`, `lastfault`/`dump`, `macro`. Ship a pinned `requirements.txt`
+  (pyserial, Pillow) + a venv bootstrap + `host/README.md` — every doc says `.venv/bin/python` but nothing
+  creates it (guaranteed first-command stumble for a new contributor).
+- [ ] **(7) Recorder lifecycle + SD housekeeping over CDC1** — value MED / effort M / risk low.
+  `rec_start`/`rec_stop`/`rec_rotate`, `rm` by index, `rec_reset` (zero `rec_drop`/`faults`/`revived`), all via
+  the established async-post-to-single-owner-SD-task pattern (structurally off the DAP path), reflected through
+  `rec_snapshot_t` so the recorder screen updates live. "SD full" is a reachable, already-surfaced state with
+  no way to act on it today (you must pull the card). Also adds the missing `{"q":"fb"}` to the README table.
+- [ ] **(8) Spike debugprobe-v2.3.1 (post-#189 fix) through Gate 1** — value MED / effort L / risk MED *(needs bench)*.
+  The project's own documented next upstream step (Risk R10 / `upstream-strategy.md` §1) and biggest
+  anti-fossilisation lever; Gate 1 passing was the precondition, now met. Re-diff only the 3 shadowed overlay
+  files (`main.c`/`cdc_uart.c`/`usb_descriptors.c`) against the new base, build to a separate `BUILD_DIR`, run
+  `gate1_soak.sh >=1000` reading the authoritative 0-stall verdict line, write a falsifiable rebase-or-stay
+  verdict. Don't rebase the product unless 0 stalls. Fold in the 5-minute fix: an `engineering-plan §4.1`
+  "SUPERSEDED — single-core, see Finding F1-1" banner so the stale SMP/dual-core text stops misleading the
+  future rebaser.
+
+Minor doc-debt, worth a line when working nearby: (a) document WHY `main.c:243 tud_hid_get_report_cb` is
+intentionally a no-op (the only genuine code TODO in the tree — the active DAP path is vendor/bulk and
+`set_report` IS wired), so it stops reading as unfinished work; (b) a one-paragraph "where the plan of record
+lives" pointer (engineering-plan = plan of record, this file = live checklist, CHANGELOG = shipped) to ease
+onboarding given there's no single `ROADMAP.md`.
+
 ## Upstream (see `docs/upstream-strategy.md`)
 - [ ] Track official **debugprobe stable tags**; after Gate 1 is green on v2.2.3, spike `v2.3.1`
   through the soak and rebase the overlay if it passes.
@@ -169,4 +231,10 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
 - [x] CI/CD: `.github/workflows/firmware-c.yml` — manual-dispatch build (setup.sh + build_fork.sh,
   pinned Arm GCC 13.3 via the self-hosted runner's fw-build cache) + the `analyze.sh` static-analysis
   gate + .uf2/.elf artifacts + optional Release (`engineering-plan.md` §7). *Untested until the org
-  remote + a workflow run exist.* TODO: host-test (Ceedling) job after M1 introduces portable logic.
+  remote + a workflow run exist.*
+- [x] **Host-tests CI job** *(2026-06-22)*: `.github/workflows/host-tests.yml` — GitHub-HOSTED
+  (ubuntu-latest), push/PR, compiles + runs the three portable unit tests (`ring_test`, `recorder_test`,
+  `blit_test`) with plain `cc`, and each test's verify-the-verifier break build (asserts the harness can
+  FAIL). The repo's first community-runnable green check; the badge now means "portable logic verified per
+  PR", not just "it builds". Done as plain `cc` rather than the originally-planned Ceedling — same coverage,
+  no extra dep. (This is item #1 of the post-v1.0.0 backlog below.)

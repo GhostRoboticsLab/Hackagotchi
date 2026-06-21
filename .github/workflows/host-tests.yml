@@ -1,0 +1,89 @@
+name: Host unit tests
+
+# GitHub-HOSTED, push/PR — the complement to firmware-c.yml (which is manual-only, self-hosted, and
+# does build + analyze.sh ONLY). These three tests cover the load-bearing PORTABLE logic — the SPSC
+# ring, the recorder wedge/heartbeat state machine, and the 1-bit sprite blit — and need no probe, so
+# they run unattended on a hosted runner. This is the repo's first community-runnable green check:
+# an external contributor gets a real test signal without the pinned local Arm GCC + pico-sdk toolchain.
+#
+# Each test is run TWICE: the real build (must PASS, exit 0) and its verify-the-verifier break build
+# (-D*_SELFTEST_BREAK, must FAIL / exit nonzero). The break run is the point — it proves the harness can
+# actually go red, so a passing check means "the logic is verified", not "a test that can't fail ran".
+# A green badge from THIS workflow therefore means "portable logic verified per PR", whereas a green
+# firmware-c.yml only ever meant "it compiles + static-analysis is clean".
+
+on:
+  push:
+    paths:
+      - 'firmware/c/src/**'
+      - 'firmware/c/tests/**'
+      - '.github/workflows/host-tests.yml'
+  pull_request:
+    paths:
+      - 'firmware/c/src/**'
+      - 'firmware/c/tests/**'
+      - '.github/workflows/host-tests.yml'
+
+concurrency:
+  group: host-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    name: Portable logic (no hardware)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: SPSC ring (src/spsc_ring.h)
+        run: |
+          set -euo pipefail
+          echo "== real build: must PASS =="
+          cc -I firmware/c/src -Wall -Wextra -O2 -pthread \
+            firmware/c/tests/m1/ring_test.c -o /tmp/ring_test
+          /tmp/ring_test
+          echo "== verify-the-verifier: break build must FAIL =="
+          cc -I firmware/c/src -DRING_SELFTEST_BREAK -O2 -pthread \
+            firmware/c/tests/m1/ring_test.c -o /tmp/ring_bad
+          if /tmp/ring_bad; then
+            echo "ERROR: break build PASSED — this test cannot fail (silent pass)"; exit 1
+          else
+            echo "ok: break build failed as expected"
+          fi
+
+      - name: Recorder core (src/recorder.c)
+        run: |
+          set -euo pipefail
+          echo "== real build: must PASS =="
+          cc -I firmware/c/src -Wall -Wextra -O2 \
+            firmware/c/tests/m2/recorder_test.c firmware/c/src/recorder.c -o /tmp/recorder_test
+          /tmp/recorder_test
+          echo "== verify-the-verifier: break build must FAIL =="
+          cc -I firmware/c/src -DREC_SELFTEST_BREAK -O2 \
+            firmware/c/tests/m2/recorder_test.c firmware/c/src/recorder.c -o /tmp/recorder_bad
+          if /tmp/recorder_bad; then
+            echo "ERROR: break build PASSED — this test cannot fail (silent pass)"; exit 1
+          else
+            echo "ok: break build failed as expected"
+          fi
+
+      - name: Sprite blit (src/ssd1306/ssd1306_blit_impl.h)
+        run: |
+          set -euo pipefail
+          echo "== real build: must PASS =="
+          cc -I firmware/c/src/ssd1306 -Wall -Wextra -O2 \
+            firmware/c/tests/m_ui/blit_test.c -o /tmp/blit_test
+          /tmp/blit_test
+          echo "== verify-the-verifier: break build must FAIL =="
+          cc -I firmware/c/src/ssd1306 -DBLIT_SELFTEST_BREAK -O2 \
+            firmware/c/tests/m_ui/blit_test.c -o /tmp/blit_bad
+          if /tmp/blit_bad; then
+            echo "ERROR: break build PASSED — this test cannot fail (silent pass)"; exit 1
+          else
+            echo "ok: break build failed as expected"
+          fi
