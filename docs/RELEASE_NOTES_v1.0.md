@@ -1,4 +1,4 @@
-## Hackagotchi probe firmware — v1.0.0 🛠️🐾
+## Hackagotchi probe firmware — v1.0 🛠️🐾
 
 First public release. A **debug probe that's also a black-box flight recorder and a
 Tamagotchi-style dashboard** for dev boards that go dark — a fork of Raspberry Pi

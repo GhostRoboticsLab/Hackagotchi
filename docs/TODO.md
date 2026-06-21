@@ -152,7 +152,7 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
 - [ ] **Raise the reliability stack further** over time (per user) — more host tests, HIL CI,
   tighter analyzers, RTT observability.
 
-## Next — post-v1.0.0 backlog (ranked, 2026-06-22)
+## Next — post-v1.0 backlog (ranked, 2026-06-22)
 
 Prioritised from a survey→propose→rank pass over the current tree (value / effort / R1-risk / fit). Item
 **#1 (host-tests CI) is DONE** — see Housekeeping above. The rest, best-first:
@@ -180,12 +180,13 @@ Prioritised from a survey→propose→rank pass over the current tree (value / e
   `GATE_RESULTS.md` + `release-readiness.md`. Cheapest un-attested→attested conversion available.
 - [ ] **(5) Cut a tagged v1.1** for the shipped-but-unreleased M-UI overhaul — value HIGH / effort M / risk low.
   The Spectre ghost + sprite engine is the README's headline ("a debug probe with a soul"), but the only
-  downloadable release (v1.0.0) predates ALL of it — anyone flashing the latest release gets a product that
+  downloadable release (v1.0) predates ALL of it — anyone flashing the latest release gets a product that
   doesn't match the README. Date `CHANGELOG [Unreleased]` into a v1.1 entry, write
   `docs/RELEASE_NOTES_v1.1.md`, fold in the small README doc fixes (the undocumented `{"q":"fb"}`; the
   `{"q":"ghost"}` no-arg auto-reset behaviour), re-attest build+analyze + relevant HIL on the candidate image,
-  publish via the existing release job. Plan the tag carefully (the immutability bit bit v1.0.0 once; expect a
-  local-build/hand-attest path while the self-hosted runner is offline). Optional hardening: a
+  publish via the existing release job. Plan the v1.1 tag deliberately — GitHub immutable-releases permanently
+  burns a tag name once a release uses it (it already forced v1.0.0 → v1.0); expect a local-build/hand-attest
+  path while the self-hosted runner is offline. Optional hardening: a
   `verify-release.sh` that rebuilds from the tag and diffs the .uf2 sha256 against the published artifact (the
   "byte-identical rebuild" claim is currently unscripted).
 - [ ] **(6) Host-CLI convenience wrappers + packaging** — value MED / effort M / risk low *(host-only, can't touch R1)*.
@@ -237,4 +238,4 @@ onboarding given there's no single `ROADMAP.md`.
   `blit_test`) with plain `cc`, and each test's verify-the-verifier break build (asserts the harness can
   FAIL). The repo's first community-runnable green check; the badge now means "portable logic verified per
   PR", not just "it builds". Done as plain `cc` rather than the originally-planned Ceedling — same coverage,
-  no extra dep. (This is item #1 of the post-v1.0.0 backlog below.)
+  no extra dep. (This is item #1 of the post-v1.0 backlog below.)

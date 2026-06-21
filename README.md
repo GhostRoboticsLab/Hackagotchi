@@ -7,7 +7,7 @@
 [![Firmware CI](https://github.com/GhostRoboticsLab/Hackagotchi/actions/workflows/firmware-c.yml/badge.svg)](https://github.com/GhostRoboticsLab/Hackagotchi/actions/workflows/firmware-c.yml)
 [![Firmware: MIT](https://img.shields.io/badge/firmware%2Fc-MIT-blue.svg)](firmware/c/LICENSE)
 [![Project: GPL-3.0-or-later](https://img.shields.io/badge/project-GPL--3.0--or--later-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/badge/firmware-v1.0.0-green.svg)](https://github.com/GhostRoboticsLab/Hackagotchi/releases)
+[![Release](https://img.shields.io/badge/firmware-v1.0-green.svg)](https://github.com/GhostRoboticsLab/Hackagotchi/releases)
 
 <!-- HERO RENDER: export the Blender hero to docs/media/hero.png (recommend ~1280px wide, transparent or dark bg) and uncomment the <img> below; then drop the social card that follows it.
 <img src="docs/media/hero.png" width="640" alt="Hackagotchi — XIAO RP2040: CMSIS-DAP debug probe + UART black-box recorder + reactive OLED companion" />

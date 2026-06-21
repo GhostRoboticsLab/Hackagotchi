@@ -1,8 +1,8 @@
 # Changelog
 
 All notable changes to the Hackagotchi C probe firmware (`firmware/c`) are documented here.
-Format follows [Keep a Changelog](https://keepachangelog.com/); versions are the firmware tags
-`v<x.y.z>`. The semver is compiled into the binary and reported by `{"q":"status"}` → `"ver"`.
+Format follows [Keep a Changelog](https://keepachangelog.com/); headings are the release tags. The
+firmware's own semver is compiled into the binary and reported by `{"q":"status"}` → `"ver"`.
 
 ## [Unreleased]
 
@@ -30,7 +30,7 @@ camera-free text-attestation model.
 Footprint: text +3.3 KB, bss +164 B total. Static-analysis gate green; the blit host unit test and an
 extended `screen_hil.py` attest the new surfaces.
 
-## [1.0.0] - 2026-06-21
+## [1.0] - 2026-06-21
 
 First public release. A debug probe that is *also* a black-box flight recorder and a reactive,
 Tamagotchi-style dashboard for dev boards that go dark — a fork of Raspberry Pi `debugprobe`

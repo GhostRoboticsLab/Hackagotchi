@@ -1,4 +1,4 @@
-# Release readiness — `v1.0.0`
+# Release readiness — `v1.0`
 
 The single evidence index for the C probe firmware release. It draws the line between what **CI can
 automate** and what is **operator-attested on real hardware**, and pins each green to the *tagged
@@ -8,23 +8,23 @@ image* (not a per-increment dev build).
 > (+ for some, an SD card / SWD fixtures). CI (`.github/workflows/firmware-c.yml`, self-hosted runner)
 > runs **only** the build + the `analyze.sh` static-analysis gate. A green CI badge therefore means
 > "builds + passes static analysis," **not** "the gates ran." The gates below were run by hand on the
-> v1.0.0 image and recorded here.
+> v1.0 image and recorded here.
 
 ## Release identity
 
 | | |
 |---|---|
-| Tag | `v1.0.0` |
+| Tag | `v1.0` |
 | Version (compiled in) | `1.0.0` — reported live by `{"q":"status"}` → `"ver"` |
 | Base | fork of `raspberrypi/debugprobe` @ `debugprobe-v2.2.3` (single-core FreeRTOS) |
 | Local build (attested image) | `text 170604 / bss 84140` · `.uf2` sha256 `7d1a2b50…27047` · `.elf` sha256 `149708ea…f380` |
 | Released artifact | **byte-identical local rebuild** — `.uf2` sha256 `7d1a2b50…27047` matches the attested image bit-for-bit. The self-hosted CI runner was offline after a power-cycle, so it was built locally from the tagged source (reproducible) and released directly; CI remains available for future tags. |
-| Published | **tag `v1.0.0` @ `f891eaa`** · [Release](https://github.com/GhostRoboticsLab/Hackagotchi/releases/tag/v1.0.0) (`.uf2` + `.elf` + NOTICE + LICENSE) · 2026-06-21 |
-| History note | On 2026-06-21 the public history was rewritten — agent co-author/session trailers stripped from the maintainer's commits, internal strategy docs purged. The original immutable `fw-c-v1.0.0` tag could not be re-pointed (GitHub permanently reserves immutable-release tag names), so the cleaned release is published as **`v1.0.0`** at the rewritten commit `f891eaa`; the `.uf2` is byte-identical to the pre-rewrite attested image (firmware source is unchanged by the rewrite). |
+| Published | **tag `v1.0` @ `44081d9`** · [Release](https://github.com/GhostRoboticsLab/Hackagotchi/releases/tag/v1.0) (`.uf2` + `.elf` + NOTICE + LICENSE) · 2026-06-22 |
+| History note | The firmware version compiled into the binary is `1.0.0` (unchanged — `{"q":"status"}` → `ver=1.0.0`; build with `VERSION=1.0.0` to reproduce the byte-identical `.uf2`). The public git history was scrubbed in two passes (2026-06-21: internal strategy docs purged; 2026-06-22: residual agent co-author/session trailers + strategy detail stripped from commit messages); the cleaned release commit is `44081d9`, byte-identical in tree to the pre-scrub attested image. GitHub immutable-releases permanently reserves a tag name once a release has used it, so the original `v1.0.0` tag could be neither re-pointed nor reused — the release was retired and re-cut under a fresh tag **`v1.0`** at `44081d9`. |
 
 ## Section A — CI-automated (`firmware-c.yml`)
 
-| Check | Tool | Result on v1.0.0 |
+| Check | Tool | Result on v1.0 |
 |---|---|---|
 | Build | CMake + pinned Arm GCC 13.3 + pico-sdk 2.2.0 | **PASS** (clean) |
 | Static-analysis gate | `analyze.sh` (GCC `-fanalyzer` + cppcheck) | **PASS** — 0 analyzer / 0 style on the pristine TUs (`cdc1_control.c`, `hackagotchi_dashboard.c`); only report-only upstream-inherited warnings |
@@ -33,12 +33,12 @@ image* (not a per-increment dev build).
 Host unit tests (`ring_test`, `recorder_test`) are pure-host and **CI-able** (no hardware); they pass
 locally (below) and a CI job for them is a tracked follow-up.
 
-## Section B — HIL-attested on the v1.0.0 image (NOT run in CI)
+## Section B — HIL-attested on the v1.0 image (NOT run in CI)
 
 Ports: CDC1/control `/dev/cu.usbmodem21204`, CDC0/bridge `/dev/cu.usbmodem21202`. Runner:
-`…/PicoInky/.venv/bin/python`. Device flashed with the v1.0.0 `.uf2` (`{"q":"status"}` → `ver=1.0.0`).
+`…/PicoInky/.venv/bin/python`. Device flashed with the v1.0 `.uf2` (`{"q":"status"}` → `ver=1.0.0`).
 
-| Suite | Proves | On v1.0.0 | Result |
+| Suite | Proves | On v1.0 | Result |
 |---|---|---|---|
 | Version provenance | device self-reports its release | ✅ re-run | **PASS** — `fw=Hackagotchi, ver=1.0.0` |
 | `m1/ring_test` (host) | SPSC ring (FIFO/wrap/drop/fence) | ✅ re-run | **PASS** 35/35 |
@@ -57,8 +57,8 @@ Ports: CDC1/control `/dev/cu.usbmodem21204`, CDC0/bridge `/dev/cu.usbmodem21202`
 | **Gate 2 deferral (b)** `gate2_cdc.py --live-uart` | CDC0 live UART concurrent with a DAP flash soak | ✅ re-run | **PASS** — loopback 125/125, `urx_drop`/`utx_drop` +0, CDC1 answered 125/125, **0 stalls** ¹ |
 | Gate 0 | probe halts/erases/flashes a target | cited | **PASS** 5/5 — `GATE_RESULTS.md` (prior image; needs SWD target + fixtures to re-run) |
 | Gate 1 | OLED task survives sustained flash, 0 stalls; at-DAP-prio contention | cited | **PASS** — `GATE_RESULTS.md` (1000/1000 + self-attesting 300; prior image) |
-| Gate 2 core | 2 nodes, DAP binds, 100/100 JSON | cited + corroborated | **PASS** — `GATE_RESULTS.md`; on v1.0.0 the probe enumerates as `Hackagotchi Probe (CMSIS-DAP)` and `--live-uart` exercised both CDCs + DAP live |
-| M2 coexistence soak (R1) | 0 stalls under continuous SD-write + DAP flash | cited | **PROBE PASS** — `M4_RESULTS.md`: **0 stalls, flash succeeded every cycle**; the 13/300 (4.3%) are RETRYABLE host/USB hiccups, not flash-fails or probe faults (M4 image; v1.0.0 differs only by the `ver` string, so not re-run) |
+| Gate 2 core | 2 nodes, DAP binds, 100/100 JSON | cited + corroborated | **PASS** — `GATE_RESULTS.md`; on v1.0 the probe enumerates as `Hackagotchi Probe (CMSIS-DAP)` and `--live-uart` exercised both CDCs + DAP live |
+| M2 coexistence soak (R1) | 0 stalls under continuous SD-write + DAP flash | cited | **PROBE PASS** — `M4_RESULTS.md`: **0 stalls, flash succeeded every cycle**; the 13/300 (4.3%) are RETRYABLE host/USB hiccups, not flash-fails or probe faults (M4 image; v1.0 differs only by the `ver` string, so not re-run) |
 
 ¹ First run: the target re-glitched its QSPI (`fails=300`, still 0 stalls — the documented fragility).
 **Clean re-run after a power-cycle (2026-06-21): PASS — `fails=1` (1%), 0 stalls, loopback 64/64,
@@ -73,7 +73,7 @@ UART + USB liveness. Unambiguous close of deferral (b).
    `usbmodem21202` silent). The full interactive 3×-replug + 1-reboot run is available via
    `gate2_cdc.py --replug-rounds 4` (it prompts the operator each round).
 2. ~~Gate 2 deferral (b) clean re-run~~ — **DONE** (footnote ¹: clean PASS on the power-cycled target).
-3. *(optional rigor)* re-run Gate 0/1 + `coexist_soak.py 300` on the v1.0.0 image (cited above from the
+3. *(optional rigor)* re-run Gate 0/1 + `coexist_soak.py 300` on the v1.0 image (cited above from the
    functionally-identical M4 image).
 
 ## Carried caveats (unchanged from M4)
