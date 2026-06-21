@@ -107,6 +107,7 @@ Flash: BOOTSEL the XIAO (hold **B**, tap **R**, release **B**) then `picotool lo
 - **Small, atomic commits**, each one building + passing the gate on its own.
 - **Conventional-commit subjects**: `feat(scope): …`, `fix: …`, `docs: …`, `test: …`, `chore: …`.
 - **Sign off every commit** (`git commit -s`) — we use the [DCO](https://developercertificate.org/); your sign-off certifies you can contribute the change.
+- **Enable the shared hooks once per clone**: `git config core.hooksPath .githooks`. The `pre-commit` hook keeps per-developer AI-assistant context files (`CLAUDE.md`, `GEMINI.md`, `.cursorrules`, …) out of the repo — they're personal (use whatever assistant/style you like) and already `.gitignore`'d; the hook just blocks an accidental `git add -f`.
 - **Open a PR against `main`** with: what changed and *why*, which R1 rule it touches (if any), and the test evidence — host-test output and/or the HIL `*_hil.py` PASS lines (or "needs bench: &lt;which&gt;" if you can't run them). CI (build + `analyze.sh`) must be green.
 - For firmware changes, say explicitly whether anything runs on or above the DAP path — reviewers look there first.
 

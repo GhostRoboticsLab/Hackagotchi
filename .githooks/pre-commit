@@ -1,0 +1,28 @@
+#!/bin/sh
+# pre-commit — keep per-developer AI coding-assistant context files out of the shared repo.
+#
+# These files (CLAUDE.md, GEMINI.md, .cursorrules, …) are personal: everyone has their own style
+# and may use a different assistant, so they are .gitignore'd. .gitignore stops the accidental
+# `git add`; this hook also rejects a deliberate `git add -f`, so they can't be committed by mistake.
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+# Rare, intentional override for a single commit:   git commit --no-verify
+#
+# Keep this list in sync with the matching block in .gitignore.
+
+# Files staged for this commit (Added / Copied / Modified / Renamed).
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+
+blocked=$(printf '%s\n' "$staged" | grep -E \
+  '(^|/)CLAUDE\.md$|(^|/)CLAUDE\.local\.md$|(^|/)GEMINI\.md$|(^|/)\.cursorrules$|(^|/)\.windsurfrules$|(^|/)\.aider[^/]*$|^\.github/copilot-instructions\.md$')
+
+if [ -n "$blocked" ]; then
+    echo "pre-commit: refusing to commit per-developer AI assistant file(s):" >&2
+    printf '     %s\n' $blocked >&2
+    echo >&2
+    echo "  These are personal context files and are .gitignore'd on purpose." >&2
+    echo "  Unstage them:   git restore --staged <file>" >&2
+    echo "  Intentional one-off override:   git commit --no-verify" >&2
+    exit 1
+fi
+exit 0

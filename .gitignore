@@ -25,6 +25,21 @@ config.json
 docs/private/
 firmware/c/build_fork.local.sh
 
+# AI coding-assistant context files — personal and per-developer: each collaborator may use a
+# different assistant (or their own house style), so these never belong in the shared tree.
+# CLAUDE.md was never committed; this keeps it (and the equivalents) untracked for everyone.
+# The .githooks/pre-commit hook enforces the same list against an explicit `git add -f`.
+CLAUDE.md
+CLAUDE.local.md
+**/CLAUDE.md
+**/CLAUDE.local.md
+GEMINI.md
+**/GEMINI.md
+.cursorrules
+.windsurfrules
+.aider*
+.github/copilot-instructions.md
+
 # Social-card / render source assets (large raw generations kept local, not in the repo).
 # Only the web-ready docs/media/social-preview.jpg (<1 MB) is committed.
 img_assets/
