@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # hackagotchi_ctl.py - host CLI for Hackagotchi's USB host-control commands.
 #
-# Hackagotchi (the XIAO UART bridge / black-box recorder, dir hackagotchi/) accepts JSON
+# Hackagotchi (the XIAO UART bridge / black-box recorder, firmware in firmware/c/) accepts JSON
 # command lines on its USB-CDC and replies with JSON. This is the companion driver for
 # those commands so you don't have to hand-echo JSON at the port. Run with the venv:
 #
-#   .venv/bin/python tools/hackagotchi_ctl.py status            # bridge state snapshot
-#   .venv/bin/python tools/hackagotchi_ctl.py freeze            # dump the recorder's freeze-frame
-#   .venv/bin/python tools/hackagotchi_ctl.py screen 3          # jump the bridge to a screen (0..11)
-#   .venv/bin/python tools/hackagotchi_ctl.py clear             # reset tx/rx/throughput/hits stats
-#   .venv/bin/python tools/hackagotchi_ctl.py watch             # live-tail the relayed telemetry
-#   .venv/bin/python tools/hackagotchi_ctl.py --port /dev/cu.usbmodemXXXX status
+#   .venv/bin/python host/hackagotchi_ctl.py status            # bridge state snapshot
+#   .venv/bin/python host/hackagotchi_ctl.py freeze            # dump the recorder's freeze-frame
+#   .venv/bin/python host/hackagotchi_ctl.py screen 3          # jump the bridge to a screen (0..11)
+#   .venv/bin/python host/hackagotchi_ctl.py clear             # reset tx/rx/throughput/hits stats
+#   .venv/bin/python host/hackagotchi_ctl.py watch             # live-tail the relayed telemetry
+#   .venv/bin/python host/hackagotchi_ctl.py --port /dev/cu.usbmodemXXXX status
 #
 # The bridge is auto-detected by probing each /dev/cu.usbmodem* with {"q":"status"} and
 # matching the "fw":"Hackagotchi" reply (the Pico's own port stays silent / isn't a bridge).
