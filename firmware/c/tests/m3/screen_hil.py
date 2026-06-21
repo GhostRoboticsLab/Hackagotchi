@@ -83,6 +83,17 @@ def main():
     print(f"auto-cycle {a} -> {b}")
     chk(a == 0 and b == (a + 1) % nscr, "auto-cycle advances exactly one screen (~6s, no input)")
 
+    # M-UI-2: the persistent status bar attests on EVERY screen ("BAR ...") and the attestation never
+    # overflows the cap — DASH_MAX_LINES was raised 6->8 precisely so adding the BAR (and later cat/ghost)
+    # tokens can't silently drop a literal fact. text = "title\\nline0\\n..." so newline-segments <= 8+1.
+    DASH_MAX_LINES = 8
+    nscr_all = ctrl('{"q":"screen"}').get("n", 6)
+    for n in range(nscr_all):
+        ctrl('{"q":"screen","n":%d}' % n); time.sleep(0.35)
+        txt = ctrl('{"q":"screen"}').get("text", "")
+        chk("BAR" in txt, f"screen {n}: status bar attests (BAR token present)")
+        chk(txt.count("\n") + 1 <= DASH_MAX_LINES + 1, f"screen {n}: attestation within cap (no silent drop)")
+
     sc2 = ctrl('{"q":"screen"}')
     print(f"loops={sc2.get('loops')} shows={sc2.get('shows')} dstack={sc2.get('dstack')}")
     chk(sc2.get("shows", 0) > sh0, "show-success counter climbing (frames flush to panel)")

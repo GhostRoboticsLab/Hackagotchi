@@ -1,0 +1,108 @@
+; Hackagotchi UI sprites — ASCII art source for tools/spr_gen.py.  SPDX-License-Identifier: MIT
+; Edit this, then regenerate:  tools/spr_gen.py src/ssd1306/sprites.spr -o src/ssd1306/sprites.gen.h
+;   lit pixel = any of  # X x * @ 1 O      off pixel = anything else (we use '.')
+; Eyes/holes are authored as OFF pixels inside a lit body, so a plain OR-blit over the dark
+; header background reads them as dark voids — no ANDNOT pass needed (feasibility-friendly).
+
+; ---- 8x8 status-bar glyphs (M-UI-2) ----
+@sprite glyph_rec      ; record dot (logging active)
+..####..
+.######.
+########
+########
+########
+########
+.######.
+..####..
+@end
+
+@sprite glyph_sd       ; SD card (clipped corner)
+.######.
+.#####..
+.######.
+.######.
+.######.
+.######.
+.######.
+........
+@end
+
+@sprite glyph_dap      ; lightning bolt (DAP / SWD activity)
+...##...
+..##....
+.##.....
+.#####..
+...##...
+..##....
+.##.....
+##......
+@end
+
+@sprite ghost_pip      ; 8x8 ghost for the status bar (M-UI-3)
+..####..
+.######.
+##.##.##
+########
+########
+########
+#.##.##.
+........
+@end
+
+; ---- 16x16 ghost "Spectre" vitals states (M-UI-3) ----
+@sprite ghost_live     ; possessed / target alive: solid body, eye-voids, scalloped hem
+....########....
+..############..
+.##############.
+.##############.
+################
+################
+###..####..#####
+###..####..#####
+################
+################
+################
+################
+################
+################
+##.###.###.###.#
+#..##..##..##..#
+@end
+
+@sprite ghost_pale     ; wedged: hollow outline, flat dash eyes (the "going pale" state)
+....########....
+..##........##..
+.##..........##.
+.#............#.
+#..............#
+#..............#
+#..##....##....#
+#..............#
+#..............#
+#..............#
+#..............#
+#..............#
+#..............#
+#..............#
+##.###.###.###.#
+#..##..##..##..#
+@end
+
+@sprite ghost_glitch   ; fault: solid body torn by missing/shifted scanlines
+....########....
+..############..
+.##############.
+.##############.
+################
+....########....
+###..####..#####
+###..####..#####
+################
+..############..
+################
+########........
+................
+################
+##.###.###.###.#
+#..##..##..##..#
+@end

@@ -26,6 +26,7 @@
 #include "hg_config.h"   // M4: macro list (MACRO screen) + baud (BAUD screen)
 #include "sd_gate.h"      // rec_snapshot_t + dash_get_rec_snapshot()
 #include "hackagotchi_dashboard.h"
+#include "sprites.gen.h"  // M-UI-2: generated 1-bit sprites (status-bar glyphs + ghost vitals states)
 
 #ifndef DASH_I2C_ADDR
 #define DASH_I2C_ADDR 0x3Cu
@@ -37,7 +38,9 @@
 #define DASH_I2C_INST   i2c1    // OLED on I2C1 GP6/GP7 (sole device on the bus — no mutex)
 #define DASH_REFRESH_MS 250u    // ~4 Hz (proven-safe coexistence rate from Gate 1 / M2 soaks)
 #define DASH_CYCLE_MS  6000u    // auto-advance screens every 6 s (no button)
-#define DASH_MAX_LINES    6     // attestation text lines
+#define DASH_MAX_LINES    8     // attestation text lines (M-UI-2: raised 6->8 so the status-bar BAR
+                                //   token + cat/ghost tokens never silently drop a literal fact past
+                                //   the cap — the feasibility must-fix; costs ~2*DASH_COLW=44 B static)
 #define DASH_COLW        22     // 21 cols @ 6px pitch + NUL
 #define TP_RING          60     // throughput sparkline history (bytes/sec samples)
 
@@ -102,9 +105,22 @@ static void aline(dash_screen_t *s, const char *fmt, ...) {  // record an attest
     s->nlines++;
 }
 
-static void hdr(ssd1306_t *d, dash_screen_t *s, const char *title) {  // title @y0 + divider @y9
+// M-UI-2: the persistent status bar. The existing title row IS the bar — title text on the left,
+// global status glyphs blitted on the right (REC when logging, SD when mounted; the ghost vitals pip
+// is added in M-UI-3). Nothing in the body moves. The bar's state is ALSO emitted as a text line
+// ("BAR ...") so the cameraless HIL can verify the glyphs are honest (drawn == attested).
+static void statusbar(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
+    if (c->snap.logging)    ssd1306_blit(d, glyph_rec, glyph_rec_W, glyph_rec_H, 100, 0, SSD1306_BLIT_OR);
+    if (c->snap.sd_mounted) ssd1306_blit(d, glyph_sd,  glyph_sd_W,  glyph_sd_H,  110, 0, SSD1306_BLIT_OR);
+    aline(s, "BAR %s%sup=%lu heap=%uK",
+          c->snap.logging ? "REC " : "", c->snap.sd_mounted ? "SD " : "",
+          (unsigned long)c->up_s, (unsigned)(c->heap / 1024u));
+}
+
+static void hdr(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s, const char *title) {  // status bar + title @y0, divider @y9
     snprintf(s->title, DASH_COLW, "%s", title);
     ssd1306_draw_string(d, 2, 0, 1, s->title);
+    statusbar(c, d, s);
     ssd1306_draw_line(d, 0, 9, 127, 9);
 }
 
@@ -138,6 +154,16 @@ static void sparkline(ssd1306_t *d, const uint16_t *data, int n, int x, int y, i
         if (i) ssd1306_draw_line(d, px_prev, py_prev, px, py);
         px_prev = px; py_prev = py;
     }
+}
+
+// M-UI-2: a horizontal gauge — empty frame + a proportional fill. pct clamped 0..100.
+static void hud_gauge_h(ssd1306_t *d, int x, int y, int w, int h, int pct) {
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    if (w < 2 || h < 2) return;
+    ssd1306_draw_empty_square(d, x, y, w, h);
+    int fill = (w - 2) * pct / 100;
+    if (fill > 0) ssd1306_draw_square(d, x + 1, y + 1, fill, h - 2);
 }
 
 // ---------------- the cat mascot (ported pixel-for-pixel from main.py draw_cat) ----------------
@@ -215,7 +241,7 @@ static void draw_cat(ssd1306_t *d, bool active, uint32_t tick, const char *last_
 
 // 0 — HOME / mascot: brand + bridge/recorder stats (left) + the cat (right).
 static void screen_home(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
-    hdr(d, s, "HACKAGOTCHI");
+    hdr(c, d, s, "HACKAGOTCHI");
     char rx[12]; fmt_bytes(rx, sizeof rx, c->snap.rx_total);
     ssd1306_draw_string(d, 4, 12, 1, "rx"); ssd1306_draw_string(d, 20, 12, 1, rx);
     char up[12];
@@ -234,7 +260,7 @@ static void screen_home(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
 // 1 — SNIFFER: live UART tail (the recorder freeze tail), wrapped to 21-col lines.
 static void screen_sniffer(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     if (s_hex_mode) {   // M4: hex view — 5 bytes/row (uppercase) + ASCII gutter, last min(30,n) raw bytes
-        hdr(d, s, "HEX SNIFFER");
+        hdr(c, d, s, "HEX SNIFFER");
         const uint8_t *b = c->snap.raw;
         int n = c->snap.rawn;
         if (n == 0) { row(d, s, 0, "(no traffic yet)"); return; }
@@ -253,7 +279,7 @@ static void screen_sniffer(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) 
         }
         return;
     }
-    hdr(d, s, "UART RX LOG");
+    hdr(c, d, s, "UART RX LOG");
     const char *t = c->snap.tail;
     int len = (int)strlen(t);
     // show the LAST 4 wrapped rows (21 cols each) of the tail
@@ -273,7 +299,7 @@ static void screen_sniffer(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) 
 // 2 — RECORDER: black-box status (entirely from the snapshot).
 static void screen_recorder(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     const rec_snapshot_t *r = &c->snap;
-    hdr(d, s, "RECORDER");
+    hdr(c, d, s, "RECORDER");
     if (!r->sd_mounted) { row(d, s, 0, "SD not mounted"); return; }
     row(d, s, 0, "%s %s", r->logging ? "REC" : "off", r->file);
     char rx[12]; fmt_bytes(rx, sizeof rx, r->rx_total);
@@ -285,12 +311,14 @@ static void screen_recorder(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s)
 
 // 3 — THROUGHPUT: now/peak/total + a live bytes/sec sparkline.
 static void screen_throughput(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
-    hdr(d, s, "THROUGHPUT");
+    hdr(c, d, s, "THROUGHPUT");
     char now[12], peak[12]; fmt_bytes(now, sizeof now, c->tp_now); fmt_bytes(peak, sizeof peak, c->snap.tp_peak);
     char l0[DASH_COLW]; snprintf(l0, sizeof l0, "now %s/s", now);
     ssd1306_draw_string(d, 4, 12, 1, l0);
     char pk[DASH_COLW]; snprintf(pk, sizeof pk, "pk %s/s", peak);
     ssd1306_draw_string(d, 70, 12, 1, pk);
+    int gpct = c->snap.tp_peak ? (int)((long)c->tp_now * 100 / (long)c->snap.tp_peak) : 0;
+    hud_gauge_h(d, 2, 20, 124, 3, gpct);     // M-UI-2: now-vs-peak gauge above the history box
     ssd1306_draw_empty_square(d, 2, 24, 124, 38);
     if (s_tp_count > 0) sparkline(d, s_tp_ring, s_tp_count, 5, 26, 118, 34);
     aline(s, "now %s/s", now); aline(s, "pk %s/s", peak);
@@ -299,7 +327,7 @@ static void screen_throughput(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *
 // 4 — WATCHDOG: flight-recorder status + the target's last words.
 static void screen_watchdog(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     const rec_snapshot_t *r = &c->snap;
-    hdr(d, s, "WATCHDOG");
+    hdr(c, d, s, "WATCHDOG");
     if (r->wedge) {
         // blink the WEDGE line (draw only on the lit phase); attest stays stable so the HIL sees it.
         if ((c->frame / 3u) % 2u == 0) ssd1306_draw_string(d, 4, 12, 1, "** WEDGE **");
@@ -322,7 +350,7 @@ static void screen_watchdog(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s)
 
 // 5 — UPTIME: big uptime-since-boot + free heap (no RTC; the probe has no wall-clock).
 static void screen_uptime(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
-    hdr(d, s, "UPTIME");
+    hdr(c, d, s, "UPTIME");
     uint32_t up = c->up_s;
     char hms[12]; snprintf(hms, sizeof hms, "%02u:%02u:%02u",
                            (unsigned)(up / 3600u), (unsigned)((up / 60u) % 60u), (unsigned)(up % 60u));
@@ -337,7 +365,7 @@ static void screen_uptime(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
 // 6 (tool) — MACRO SENDER: the configured macros; sent over CDC1 {"q":"macro","i":N}. Marks the last sent.
 static void screen_macro(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     (void)c;
-    hdr(d, s, "MACRO SENDER");
+    hdr(c, d, s, "MACRO SENDER");
     int last = (int)s_macro_last;
     for (int i = 0; i < HG_N_MACROS; i++) {
         const char *m = hg_macro(i);
@@ -351,7 +379,7 @@ static void screen_macro(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
 // 7 (tool) — BAUD SELECT: the offered rates, current one marked; set over CDC1 {"q":"baud","v":N}.
 static void screen_baud(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     (void)c;
-    hdr(d, s, "BAUD SELECT");
+    hdr(c, d, s, "BAUD SELECT");
     uint32_t cur = hg_baud();
     for (int i = 0; i < HG_N_BAUDS; i++) {
         char ln[DASH_COLW];
@@ -365,7 +393,7 @@ static void screen_baud(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
 // 8 (tool) — SD EXPLORER: card status + log count; browse over CDC1 {"q":"ls"} / {"q":"cat","i":N}.
 static void screen_sd(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     const rec_snapshot_t *r = &c->snap;
-    hdr(d, s, "SD EXPLORER");
+    hdr(c, d, s, "SD EXPLORER");
     if (!r->sd_mounted) { row(d, s, 0, "SD not mounted"); return; }
     row(d, s, 0, "%u log files", (unsigned)r->log_count);
     row(d, s, 1, "cur %s", r->file[0] ? r->file : "(none)");
