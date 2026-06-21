@@ -56,6 +56,34 @@ uint32_t cdc_uart_tx_overflow(void) { return cdc_tx_oe; }
 
 static uint8_t rx_buf[64];      /* target->host: drained from the SPSC ring, not the HW FIFO.
                                  * host->target is now byte-at-a-time (non-blocking), no tx_buf. */
+
+/* [HACKAGOTCHI] M4.2 macro injection. CDC1 (TUD task) enqueues a short byte string via
+ * cdc_uart_inject(); cdc_task (the SOLE uart0 TX writer, prio +3) drains it NON-BLOCKING — same FIFO
+ * discipline as the host->target path, so the single-owner invariant and R1 are preserved (no second
+ * task ever writes the UART TX FIFO). SPSC handshake: the producer loads s_inj + publishes s_inj_n only
+ * when idle (s_inj_n==0); the consumer drains s_inj_pos->n and resets s_inj_n=0 when fully sent. */
+static char              s_inj[24];
+static volatile uint16_t s_inj_n = 0;    // bytes ready to send (0 = idle/empty)
+static uint16_t          s_inj_pos = 0;  // consumer cursor (cdc_task only)
+
+bool cdc_uart_inject(const char *s, size_t n) {
+    if (s_inj_n) return false;                   // a previous inject is still draining
+    if (n > sizeof s_inj) n = sizeof s_inj;
+    for (size_t i = 0; i < n; i++) s_inj[i] = s[i];
+    s_inj_pos = 0;
+    __atomic_thread_fence(__ATOMIC_RELEASE);      // buffer + pos visible before the length is published
+    s_inj_n = (uint16_t)n;
+    return true;
+}
+
+static void cdc_uart_drain_inject(void) {
+    uint16_t n = s_inj_n;
+    if (!n) return;
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    while (s_inj_pos < n && uart_is_writable(PROBE_UART_INTERFACE))
+        uart_get_hw(PROBE_UART_INTERFACE)->dr = (uint8_t)s_inj[s_inj_pos++];  // FIFO has space -> non-blocking
+    if (s_inj_pos >= n) s_inj_n = 0;              // fully sent -> idle (allows the next inject)
+}
 // Actually s^-1 so 25ms
 #define DEBOUNCE_MS 40
 static uint debounce_ticks = 5;
@@ -126,6 +154,10 @@ bool cdc_task(void)
     // CDC0 host connection (the black box records even with no host attached). cdc_task is the sole
     // producer of that ring; the low-prio recorder task is the sole consumer.
     if (rx_len) uart_bridge_tee(rx_buf, rx_len, (uint32_t)(time_us_64() / 1000ull));
+
+    // [HACKAGOTCHI] M4.2: send any queued macro bytes to the target (non-blocking, host-independent —
+    // works with no CDC0 host attached, since the user triggers macros over CDC1 control).
+    cdc_uart_drain_inject();
 
     if (tud_cdc_connected()) {
         was_connected = 1;

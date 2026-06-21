@@ -32,6 +32,10 @@ uint32_t uart_bridge_highwater(void);  // max ring fill observed (bytes) — bur
 // here to keep all UART-bridge telemetry getters in one place.
 uint32_t cdc_uart_tx_overflow(void);
 
+// M4.2: enqueue a short byte string to send out the target UART, drained NON-BLOCKING by cdc_task (the
+// sole uart0 TX writer). Returns false if a previous inject is still draining. Producer = CDC1/TUD task.
+bool cdc_uart_inject(const char *s, size_t n);
+
 // M2: tee captured target-RX bytes into a SECOND SPSC ring for the low-prio recorder, so the bridge
 // (cdc_task, high-prio) stays the SINGLE consumer of the primary ring. Producer = cdc_task; consumer =
 // the recorder/SD task. Also stamps PRODUCER-sourced RX liveness so the recorder's wedge timer is

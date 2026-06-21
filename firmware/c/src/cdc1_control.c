@@ -36,6 +36,7 @@
 #include "uart_bridge.h"            // uart ring stats + loopback toggle (CDC0 bridge HIL test)
 #include "sd_gate.h"                // M2: SD bring-up self-test result ({"q":"sd"})
 #include "feedback.h"               // M3.0: LED/buzzer HW-reconciliation test commands
+#include "hg_config.h"              // M4.2: macro list ({"q":"macros"} / {"q":"macro"})
 
 // Build-discriminating tags compiled into the status reply so the RUNNING firmware proves its OWN
 // identity (closes the Gate-1 provenance gap). Mirror the CMake -D flags (PRIVATE on the target).
@@ -189,6 +190,24 @@ static void handle_line(uint8_t itf, const char *line, int len) {
   // {"q":"screen","n":N} -> jump to screen N (clamped by the dashboard), then report.
   if (!strcmp(q, "screen"))    { int v; if (get_int(line, tok, n, "n", &v)) dash_nav_to(v); write_screen(itf); return; }
   if (!strcmp(q, "hex"))       { bool m = dash_hex_toggle(); char r[20]; snprintf(r, sizeof r, "{\"hex\":%d}\n", m ? 1 : 0); reply(itf, r); return; }
+  // M4.2 macro sender: list the configured macros / send macro i (TEXT + CRLF) out the target UART.
+  if (!strcmp(q, "macros")) {
+    static char r[160]; int o = snprintf(r, sizeof r, "{\"macros\":[");
+    for (int i = 0; i < HG_N_MACROS; i++)
+      o += snprintf(r + o, sizeof r - (size_t)o, "%s\"%s\"", i ? "," : "", hg_macro(i));
+    snprintf(r + o, sizeof r - (size_t)o, "]}\n");
+    reply(itf, r); return;
+  }
+  if (!strcmp(q, "macro")) {
+    int i; if (!get_int(line, tok, n, "i", &i)) { reply(itf, "{\"err\":\"noi\"}\n"); return; }
+    const char *m = hg_macro(i);                       // "" if i out of range / empty
+    if (!m[0]) { reply(itf, "{\"err\":\"range\"}\n"); return; }
+    char buf[HG_MACRO_MAX + 2]; int bn = snprintf(buf, sizeof buf, "%s\r\n", m);
+    if (!cdc_uart_inject(buf, (size_t)bn)) { reply(itf, "{\"err\":\"busy\"}\n"); return; }
+    dash_macro_mark(i);
+    static char r[48]; snprintf(r, sizeof r, "{\"sent\":%d,\"macro\":\"%s\"}\n", i, m);
+    reply(itf, r); return;
+  }
   // UART-bridge HIL self-test: PL011 internal loopback (TX->RX in-chip) — round-trip CDC0 with no jumper.
   if (!strcmp(q, "uloop_on"))  { uart_bridge_set_loopback(PROBE_UART_INTERFACE, true);  reply(itf, "{\"uloop\":1}\n"); return; }
   if (!strcmp(q, "uloop_off")) { uart_bridge_set_loopback(PROBE_UART_INTERFACE, false); reply(itf, "{\"uloop\":0}\n"); return; }

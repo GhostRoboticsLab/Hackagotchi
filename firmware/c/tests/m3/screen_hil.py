@@ -42,7 +42,7 @@ def main():
     ctrl('{"q":"screen","n":0}'); time.sleep(0.5)
     sc0 = ctrl('{"q":"screen"}'); print("screen0:", sc0)
     chk(sc0.get("screen") == 0, "on screen 0")
-    chk(sc0.get("n") == 6, "6 screens registered")
+    chk(sc0.get("n") >= 6, "at least the 6 monitoring screens registered (n=%d)" % sc0.get("n", 0))
     chk("HACKAGOTCHI" in sc0.get("text", ""), "screen 0 = HOME/mascot (HACKAGOTCHI)")
     sh0 = sc0.get("shows", 0)
 
@@ -63,7 +63,8 @@ def main():
         chk(key in ctrl('{"q":"screen"}').get("text", ""), f"screen {n} = {nm}")
 
     ctrl('{"q":"screen","n":0}'); ctrl('{"q":"prev"}'); time.sleep(0.5)
-    chk(ctrl('{"q":"screen"}').get("screen") == 5, "prev from 0 wraps to last screen (5)")
+    sp = ctrl('{"q":"screen"}'); nn = sp.get("n", 6)
+    chk(sp.get("screen") == nn - 1, f"prev from 0 wraps to the last screen ({nn - 1})")
 
     crashes_before = ctrl('{"q":"status"}').get("crashes", -1)
     ctrl('{"q":"screen","n":99}'); time.sleep(0.5)

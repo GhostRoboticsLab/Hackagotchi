@@ -23,6 +23,7 @@
 
 #include "ssd1306.h"
 #include "i2c1_bus.h"
+#include "hg_config.h"   // M4: macro list (MACRO screen) + baud (BAUD screen)
 #include "sd_gate.h"      // rec_snapshot_t + dash_get_rec_snapshot()
 #include "hackagotchi_dashboard.h"
 
@@ -59,6 +60,10 @@ void dash_nav_to(int idx)     { __atomic_store_n(&s_nav_abs, idx, __ATOMIC_RELAX
 static volatile bool s_hex_mode = false;
 bool dash_hex_toggle(void) { s_hex_mode = !s_hex_mode; return s_hex_mode; }
 bool dash_hex_mode(void)   { return s_hex_mode; }
+
+// M4.2: last macro index sent over CDC1, marked on the MACRO screen. Single writer (the CDC1 handler).
+static volatile int32_t s_macro_last = -1;
+void dash_macro_mark(int i) { s_macro_last = i; }
 
 // --- derived dashboard state (updated once per frame, read by the screen fns) ---
 typedef struct {
@@ -329,10 +334,28 @@ static void screen_uptime(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     aline(s, "%s", hms); aline(s, "%s", sub);
 }
 
+// 6 (tool) — MACRO SENDER: the configured macros; sent over CDC1 {"q":"macro","i":N}. Marks the last sent.
+static void screen_macro(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
+    (void)c;
+    hdr(d, s, "MACRO SENDER");
+    int last = (int)s_macro_last;
+    for (int i = 0; i < HG_N_MACROS; i++) {
+        const char *m = hg_macro(i);
+        char ln[DASH_COLW];
+        snprintf(ln, sizeof ln, "%c%d %s", (i == last) ? '>' : ' ', i, (m && m[0]) ? m : "-");
+        ssd1306_draw_string(d, 2, 11 + i * 9, 1, ln);
+        if (s->nlines < DASH_MAX_LINES) { snprintf(s->line[s->nlines], DASH_COLW, "%s", ln); s->nlines++; }
+    }
+}
+
 static void (*const SCREENS[])(const dash_ctx_t *, ssd1306_t *, dash_screen_t *) = {
+    // monitoring screens (auto-cycled) ...
     screen_home, screen_sniffer, screen_recorder, screen_throughput, screen_watchdog, screen_uptime,
+    // ... then CDC1-summoned tool screens (NOT auto-cycled):
+    screen_macro,
 };
 #define N_SCREENS ((int)(sizeof(SCREENS) / sizeof(SCREENS[0])))
+#define N_MONITOR 6   // screens 0..5 auto-cycle; index 6+ are tool screens reached only via CDC1 nav
 int dash_screen_count(void) { return N_SCREENS; }
 
 // --- published attestation (seqlock; the text the framework recorded this frame) ---
@@ -374,7 +397,10 @@ static int next_index(int idx, uint32_t now, uint32_t *last_cycle) {
     bool manual = false;
     if (a >= 0)       { idx = a; manual = true; }
     else if (dl != 0) { idx += (int)dl; manual = true; }
-    else if ((uint32_t)(now - *last_cycle) >= DASH_CYCLE_MS) { idx++; *last_cycle = now; }
+    else if (idx < N_MONITOR && (uint32_t)(now - *last_cycle) >= DASH_CYCLE_MS) {
+        idx++; if (idx >= N_MONITOR) idx = 0;   // auto-cycle stays within the monitoring screens (0..5);
+        *last_cycle = now;                       // a summoned tool screen (6+) stays put until manual nav
+    }
     if (manual) *last_cycle = now;
     idx = ((idx % N_SCREENS) + N_SCREENS) % N_SCREENS;
     return idx;

@@ -71,6 +71,7 @@ add_executable(hackagotchi_probe
         ${CMAKE_CURRENT_LIST_DIR}/src/recorder.c             # M2: black-box recorder core (host-tested)
         ${CMAKE_CURRENT_LIST_DIR}/src/i2c1_bus.c             # I2C1 bring-up (OLED-only, FM+ 1 MHz, no mutex)
         ${CMAKE_CURRENT_LIST_DIR}/src/feedback.c             # M3.0: status LEDs (GP17/16) + buzzer (GP29) HAL
+        ${CMAKE_CURRENT_LIST_DIR}/src/hg_config.c            # M4: runtime config store (macros, baud)
         # --- pristine upstream debugprobe sources ---
         ${UPSTREAM}/src/probe_config.c
         ${UPSTREAM}/src/probe.c
