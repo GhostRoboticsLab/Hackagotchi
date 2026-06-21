@@ -36,6 +36,9 @@ uint32_t cdc_uart_tx_overflow(void);
 // sole uart0 TX writer). Returns false if a previous inject is still draining. Producer = CDC1/TUD task.
 bool cdc_uart_inject(const char *s, size_t n);
 
+// M4.3: request a target-UART baud change, applied by cdc_task (the UART owner) on its next poll.
+void cdc_uart_set_baud_request(uint32_t b);
+
 // M2: tee captured target-RX bytes into a SECOND SPSC ring for the low-prio recorder, so the bridge
 // (cdc_task, high-prio) stays the SINGLE consumer of the primary ring. Producer = cdc_task; consumer =
 // the recorder/SD task. Also stamps PRODUCER-sourced RX liveness so the recorder's wedge timer is

@@ -84,6 +84,20 @@ static void cdc_uart_drain_inject(void) {
         uart_get_hw(PROBE_UART_INTERFACE)->dr = (uint8_t)s_inj[s_inj_pos++];  // FIFO has space -> non-blocking
     if (s_inj_pos >= n) s_inj_n = 0;              // fully sent -> idle (allows the next inject)
 }
+
+/* [HACKAGOTCHI] M4.3 runtime baud change. CDC1 (TUD task) posts a request; cdc_task (the UART owner)
+ * applies it: uart_set_baudrate reprograms the divisors, then uart_bridge_rearm re-enables the RX IRQ
+ * (ring preserved). SWD is a separate PIO, so this never touches the DAP path (R1). */
+static volatile uint32_t s_baud_req = 0;
+void cdc_uart_set_baud_request(uint32_t b) { s_baud_req = b; }
+
+static void cdc_uart_apply_baud(void) {
+    uint32_t b = s_baud_req;
+    if (!b) return;
+    s_baud_req = 0;
+    uart_set_baudrate(PROBE_UART_INTERFACE, b);
+    uart_bridge_rearm(PROBE_UART_INTERFACE);     // re-arm RX IRQ in case the reconfig cleared IMSC
+}
 // Actually s^-1 so 25ms
 #define DEBOUNCE_MS 40
 static uint debounce_ticks = 5;
@@ -158,6 +172,7 @@ bool cdc_task(void)
     // [HACKAGOTCHI] M4.2: send any queued macro bytes to the target (non-blocking, host-independent —
     // works with no CDC0 host attached, since the user triggers macros over CDC1 control).
     cdc_uart_drain_inject();
+    cdc_uart_apply_baud();   // M4.3: apply a pending runtime baud change (UART owner only)
 
     if (tud_cdc_connected()) {
         was_connected = 1;

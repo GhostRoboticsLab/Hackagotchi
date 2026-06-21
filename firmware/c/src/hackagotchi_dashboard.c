@@ -348,11 +348,25 @@ static void screen_macro(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
     }
 }
 
+// 7 (tool) — BAUD SELECT: the offered rates, current one marked; set over CDC1 {"q":"baud","v":N}.
+static void screen_baud(const dash_ctx_t *c, ssd1306_t *d, dash_screen_t *s) {
+    (void)c;
+    hdr(d, s, "BAUD SELECT");
+    uint32_t cur = hg_baud();
+    for (int i = 0; i < HG_N_BAUDS; i++) {
+        char ln[DASH_COLW];
+        snprintf(ln, sizeof ln, "%c%lu%s", (HG_BAUDS[i] == cur) ? '>' : ' ',
+                 (unsigned long)HG_BAUDS[i], (HG_BAUDS[i] == cur) ? " *" : "");
+        ssd1306_draw_string(d, 2, 11 + i * 9, 1, ln);
+        if (s->nlines < DASH_MAX_LINES) { snprintf(s->line[s->nlines], DASH_COLW, "%s", ln); s->nlines++; }
+    }
+}
+
 static void (*const SCREENS[])(const dash_ctx_t *, ssd1306_t *, dash_screen_t *) = {
     // monitoring screens (auto-cycled) ...
     screen_home, screen_sniffer, screen_recorder, screen_throughput, screen_watchdog, screen_uptime,
     // ... then CDC1-summoned tool screens (NOT auto-cycled):
-    screen_macro,
+    screen_macro, screen_baud,
 };
 #define N_SCREENS ((int)(sizeof(SCREENS) / sizeof(SCREENS[0])))
 #define N_MONITOR 6   // screens 0..5 auto-cycle; index 6+ are tool screens reached only via CDC1 nav

@@ -208,6 +208,20 @@ static void handle_line(uint8_t itf, const char *line, int len) {
     static char r[48]; snprintf(r, sizeof r, "{\"sent\":%d,\"macro\":\"%s\"}\n", i, m);
     reply(itf, r); return;
   }
+  // M4.3 baud selector: {"q":"baud"} reads current + options; {"q":"baud","v":N} sets it (validated).
+  if (!strcmp(q, "baud")) {
+    int v;
+    if (get_int(line, tok, n, "v", &v)) {
+      if (!hg_set_baud((uint32_t)v)) { reply(itf, "{\"err\":\"badbaud\"}\n"); return; }
+      cdc_uart_set_baud_request((uint32_t)v);          // applied by cdc_task (the UART owner)
+      char r[24]; snprintf(r, sizeof r, "{\"baud\":%d}\n", v); reply(itf, r); return;
+    }
+    static char r[120]; int o = snprintf(r, sizeof r, "{\"baud\":%lu,\"opts\":[", (unsigned long)hg_baud());
+    for (int i = 0; i < HG_N_BAUDS; i++)
+      o += snprintf(r + o, sizeof r - (size_t)o, "%s%lu", i ? "," : "", (unsigned long)HG_BAUDS[i]);
+    snprintf(r + o, sizeof r - (size_t)o, "]}\n");
+    reply(itf, r); return;
+  }
   // UART-bridge HIL self-test: PL011 internal loopback (TX->RX in-chip) — round-trip CDC0 with no jumper.
   if (!strcmp(q, "uloop_on"))  { uart_bridge_set_loopback(PROBE_UART_INTERFACE, true);  reply(itf, "{\"uloop\":1}\n"); return; }
   if (!strcmp(q, "uloop_off")) { uart_bridge_set_loopback(PROBE_UART_INTERFACE, false); reply(itf, "{\"uloop\":0}\n"); return; }

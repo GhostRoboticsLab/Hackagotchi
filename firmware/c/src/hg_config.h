@@ -18,4 +18,11 @@
 const char *hg_macro(int i);                    // macro i text, or "" if i out of range / empty
 void        hg_set_macro(int i, const char *s); // set macro i (truncated to 14); NULL/"" clears it
 
+// Baud rates offered by the BAUD selector (matches the MicroPython firmware). hg_set_baud validates
+// against this set; the hardware reconfig is applied by the UART owner (cdc_uart_set_baud_request).
+extern const uint32_t HG_BAUDS[];
+extern const int      HG_N_BAUDS;
+uint32_t hg_baud(void);                          // current configured target-UART baud
+bool     hg_set_baud(uint32_t b);                // false if b is not one of HG_BAUDS
+
 #endif // HACKAGOTCHI_HG_CONFIG_H
