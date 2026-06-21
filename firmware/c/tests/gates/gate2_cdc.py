@@ -165,7 +165,8 @@ def live_uart_during_dap(control, uart, secs):
     c = serial.Serial(control, 115200, timeout=0.6); c.dtr = True; time.sleep(0.2); c.reset_input_buffer()
     c.write(b'{"q":"uloop_on"}\n'); c.flush(); time.sleep(0.3); c.read(200)
     s0 = stat(c)
-    flash = subprocess.Popen(["bash", soak, "150"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    cycles = max(40, secs // 2)   # scale the DAP load to the window (proves concurrency, not endurance)
+    flash = subprocess.Popen(["bash", soak, str(cycles)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     pat = b"HACKAGOTCHI_LIVEUART_0123456789\n"
     sent = recv = ctrl_ok = ctrl_tot = 0
     t0 = time.time()

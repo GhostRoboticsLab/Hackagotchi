@@ -58,18 +58,19 @@ Ports: CDC1/control `/dev/cu.usbmodem21204`, CDC0/bridge `/dev/cu.usbmodem21202`
 | Gate 2 core | 2 nodes, DAP binds, 100/100 JSON | cited + corroborated | **PASS** — `GATE_RESULTS.md`; on v1.0.0 the probe enumerates as `Hackagotchi Probe (CMSIS-DAP)` and `--live-uart` exercised both CDCs + DAP live |
 | M2 coexistence soak (R1) | 0 stalls under continuous SD-write + DAP flash | cited | **PASS** — `M4_RESULTS.md` 13/300 (4.3%), **0 stalls** (M4 image; v1.0.0 differs only by the `ver` string, so not re-run) |
 
-¹ During the `--live-uart` run the **target board re-glitched its QSPI** (flash `fails=300`, still
-**0 stalls**) — the documented target fragility, orthogonal to the probe. The firmware concurrency claim
-(UART byte-perfect + USB never wedged + 0 stalls while SWD traffic is active) is proven; a re-run on a
-power-cycled target (so the flash *also* completes clean) is the only thing left for an unambiguous close.
+¹ First run: the target re-glitched its QSPI (`fails=300`, still 0 stalls — the documented fragility).
+**Clean re-run after a power-cycle (2026-06-21): PASS — `fails=1` (1%), 0 stalls, loopback 64/64,
+urx/utx_drop +0, CDC1 answered 64/64** — the DAP flash also completed clean *concurrent with* byte-perfect
+UART + USB liveness. Unambiguous close of deferral (b).
 
-## Open operator-gated items (the only things between here and a clean tag)
+## Open operator-gated items
 
-1. **Gate 2 deferral (a)** — node-map stability across **3 physical replug + 1 host reboot**. Tooling
-   is built: `gate2_cdc.py --replug-rounds 4` (re-discovers role by behavior each round). Needs a human
-   at the bench (physical replug/reboot).
-2. **Gate 2 deferral (b) clean re-run** — power-cycle the target, then re-run `--live-uart` so the DAP
-   flash also lands `fails≈0` alongside the (already-proven) 0-drop UART + 0 stalls.
+1. **Gate 2 deferral (a)** — node-map stability across replug/reboot. **One cycle effectively passed**:
+   the 2026-06-21 power loss + operator replug was a real reboot+replug, and behavioral discovery recovered
+   the roles correctly afterward (exactly 2 nodes; control `usbmodem21204` answers as `Hackagotchi`; bridge
+   `usbmodem21202` silent). The full interactive 3×-replug + 1-reboot run is available via
+   `gate2_cdc.py --replug-rounds 4` (it prompts the operator each round).
+2. ~~Gate 2 deferral (b) clean re-run~~ — **DONE** (footnote ¹: clean PASS on the power-cycled target).
 3. *(optional rigor)* re-run Gate 0/1 + `coexist_soak.py 300` on the v1.0.0 image (cited above from the
    functionally-identical M4 image).
 

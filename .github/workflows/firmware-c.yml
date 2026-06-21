@@ -78,9 +78,12 @@ jobs:
         run: |
           set -euo pipefail
           tag="fw-c-v${{ inputs.version }}"
-          # Release notes: extract this version's section from CHANGELOG.md if present, else a default.
+          # Release notes: prefer a curated docs/RELEASE_NOTES_v<ver>.md, else the CHANGELOG section, else a default.
           notes="$(mktemp)"
-          if awk -v v="${{ inputs.version }}" '
+          rel="docs/RELEASE_NOTES_v${{ inputs.version }}.md"
+          if [ -f "$rel" ]; then
+            cp "$rel" "$notes"; echo "(release notes from $rel)"
+          elif awk -v v="${{ inputs.version }}" '
                 $0 ~ "^## \\[?"v"\\]?([^0-9]|$)" {grab=1; next}
                 grab && /^## / {exit}
                 grab {print}
