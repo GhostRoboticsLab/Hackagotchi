@@ -1,283 +1,206 @@
-# Hackagotchi 🛠️ — a black-box flight recorder for dev boards that go dark
+# Hackagotchi 🛠️🐾
 
-**Hackagotchi** is custom MicroPython firmware that turns a **Seeed Studio XIAO RP2040** on its **base expansion board** into a pocket black-box recorder and debugging suite for *other* dev boards.
+**A black-box flight recorder for dev boards that go dark — that also debugs them, and keeps you company while it works.**
 
-The pitch: a target board's own debug channel (USB-CDC, the REPL) goes dark exactly when you need it most — during an e-paper refresh, a TLS handshake, or a crash. Hackagotchi is a *separate* MCU with its own USB, a hardware UART tap, an OLED, a battery-backed RTC, and a microSD recorder, so it keeps **watching and driving** the target while that board is wedged — logging autonomously to SD with a wall-clock timestamp, on a screen, with no host attached. It's a flight recorder, not a tethered dumb adapter.
+[![Firmware CI](https://github.com/GhostRoboticsLab/Hackagotchi/actions/workflows/firmware-c.yml/badge.svg)](https://github.com/GhostRoboticsLab/Hackagotchi/actions/workflows/firmware-c.yml)
+[![Firmware: MIT](https://img.shields.io/badge/firmware%2Fc-MIT-blue.svg)](firmware/c/LICENSE)
+[![Project: GPL-3.0-or-later](https://img.shields.io/badge/project-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/badge/firmware-v1.0.0-green.svg)](https://github.com/GhostRoboticsLab/Hackagotchi/releases)
 
-> Built on a Seeed XIAO RP2040. The current firmware runs as a single `main.py`. Flash with
-> `mpremote connect <port> cp firmware/micropython/main.py :main.py` then `reset` (plus the
-> vendored drivers — see [`firmware/micropython/lib/`](firmware/micropython/lib)).
+Hackagotchi turns a **Seeed XIAO RP2040** into three tools in one image — and does all three *at the
+same time* without ever corrupting a flash:
+
+1. 🔌 **A real SWD debug probe.** A fork of Raspberry Pi's [`debugprobe`](https://github.com/raspberrypi/debugprobe):
+   halt, erase, and reflash a wedged target chip with OpenOCD / probe-rs, *regardless of the target's
+   firmware state*.
+2. 📼 **A UART black-box recorder.** It continuously logs the target's serial output to a microSD card —
+   with session headers, heartbeats, and freeze-frames on a wedge — so when a board goes dark you still
+   have its **last words**.
+3. 🐾 **A reactive, Tamagotchi-style dashboard.** A little OLED cat that reacts to what your target is
+   doing — streaming logs, throughput, a watchdog freeze-frame — so the probe is *alive*, not a dongle.
+
+The hard part isn't any one of those; it's doing all three on one RP2040 **without the dashboard or the
+SD writer ever stealing a cycle from a flash in progress.** That guarantee — *0 DAP transfer stalls
+under load* — is the project's central invariant (we call it **R1**), and it's proven on hardware, not
+asserted. See [`docs/release-readiness.md`](docs/release-readiness.md).
+
+> **Two firmwares in this repo.** The shipping product is the **C firmware** in [`firmware/c/`](firmware/c)
+> (this README). [`firmware/micropython/`](firmware/micropython) is the original MicroPython v1 prototype,
+> kept for reference.
+
+---
+
+## Quick start — flash a release build
+
+You don't need a toolchain to *use* Hackagotchi, just `picotool` (`brew install picotool`).
+
+1. **Download** `hackagotchi_probe.uf2` from the [latest release](https://github.com/GhostRoboticsLab/Hackagotchi/releases).
+2. **Enter BOOTSEL** on the XIAO: hold **B**, tap **R**, release **B** → an `RPI-RP2` drive mounts.
+3. **Flash** it — either drag the `.uf2` onto `RPI-RP2`, or:
+   ```bash
+   picotool load -x hackagotchi_probe.uf2     # -x = run after loading
+   ```
+4. **Verify** it's alive (two USB serial ports appear — `CDC1` is the control channel):
+   ```bash
+   # find the control port (the one that answers as "Hackagotchi"), then:
+   printf '{"q":"status"}\n' > /dev/cu.usbmodemXXXX     # -> {"fw":"Hackagotchi","ver":"1.0.0",...}
+   ```
+
+Already running an older build? You don't even need the button: send `{"q":"bootsel"}` to the control
+port and it drops to BOOTSEL on its own, then `picotool load -x` the new image.
+
+To build from source instead, see **[`docs/c-firmware-build.md`](docs/c-firmware-build.md)**.
+
+---
+
+## Wiring
+
+Hackagotchi is a XIAO RP2040 on a Seeed expansion board. Wire SWD/GND to your target; everything else
+is on-board.
+
+| Function | Pins |
+|---|---|
+| **SWD → target** (the probe) | SWCLK **GP26**, SWDIO **GP27**, + GND |
+| **Target UART tap** → CDC0 bridge | TX **GP0**, RX **GP1** (uart0) |
+| **microSD** — SPI0 (black box) | SCK **GP2**, MOSI **GP3**, MISO **GP4**, CS **GP28** |
+| **OLED** — I2C1 @ 1 MHz (addr 0x3C) | SDA **GP6**, SCL **GP7** |
+| **Buzzer** (PWM) | **GP29** |
+| **WS2812 NeoPixel** (status LED) | data **GP12**, power **GP11** |
+
+> **No physical button.** GP27 became SWDIO, so there are no on-device buttons — navigation and tools
+> are driven over USB (CDC1, below). This was a deliberate trade: an extra debug pin is worth more than
+> a menu button when the device is, itself, a debugger.
+
+---
+
+## Using it
+
+Hackagotchi enumerates as **two USB serial (CDC) ports**:
+
+| Port | Role |
+|---|---|
+| **CDC0** | Transparent **UART bridge** — your target's serial console, passed straight through (115200 default; runtime-changeable). |
+| **CDC1** | **JSON control channel** — newline-delimited `{"q":"..."}` requests, JSON replies. |
+
+The numeric `/dev/cu.usbmodemXXXX` suffix is **not stable** across replug — identify the control port by
+behavior: it's the one that answers `{"q":"status"}` with `"fw":"Hackagotchi"`. The other is the bridge.
+
+### Debugging a target (SWD)
+
+It's a standard CMSIS-DAP probe — point your usual tools at it:
+
+```bash
+probe-rs list                                   # -> "Hackagotchi Probe (CMSIS-DAP)"
+probe-rs download --verify firmware.elf --chip RP2040
+openocd -f interface/cmsis-dap.cfg -f target/rp2040.cfg
+```
+
+### Control channel (CDC1) commands
+
+Send `{"q":"<cmd>", ...}\n`; you get one JSON line back.
+
+| Group | Command | Does |
+|---|---|---|
+| **Status** | `{"q":"status"}` | live telemetry: `fw, ver, heap, up, n, crashes, wd_armed, page, urx_drop, frag, …` |
+| | `{"q":"dump"}` | status + last crash report |
+| | `{"q":"lastfault"}` | the post-mortem crash box (HardFault / malloc-fail, survives reboot) |
+| **Recorder / SD** | `{"q":"rec"}` / `{"q":"tail"}` | recorder state / the on-card log tail |
+| | `{"q":"ls"}` / `{"q":"cat","i":N,"off":M}` | list logs / read log #N (by index — no path traversal) |
+| | `{"q":"sd"}` | SD mount + bring-up status |
+| **Dashboard** | `{"q":"next"}` / `{"q":"prev"}` / `{"q":"screen","n":N}` | navigate screens |
+| | `{"q":"hex"}` | toggle the SNIFFER between ASCII and hex |
+| **Tools** | `{"q":"macros"}` / `{"q":"macro","i":N}` | list / send a predefined string out the target UART |
+| | `{"q":"setmacro","i":N,"s":"..."}` | set macro N (persisted to SD) |
+| | `{"q":"baud","v":N}` | change the target-UART baud (validated set; persisted) |
+| **Feedback** | `{"q":"beep"}` / `{"q":"led",...}` / `{"q":"pixel",...}` | buzzer / status LEDs / NeoPixel |
+| **Maintenance** | `{"q":"bootsel"}` | reset to BOOTSEL for a hands-free reflash |
+| | `{"q":"wd_arm"}` / `{"q":"wd_reset"}` | software watchdog control |
+
+There are also test/diagnostic hooks used by the HIL suite (`uloop_on/off`, `recgen_on/off`, `crash`,
+`oom_test`, `wd_test`) — see [`firmware/c/src/cdc1_control.c`](firmware/c/src/cdc1_control.c).
+
+### The dashboard
+
+A cat mascot plus screens that react to your target. Six auto-cycling **monitor** screens:
+
+```
+HOME (cat)   SNIFFER        RECORDER     THROUGHPUT    WATCHDOG       UPTIME
+ /\_/\       UART RX LOG    BLACK BOX     ▁▂▄▆█▆▄▂      last freeze    + heap
+( o.o )      live tail      log NNN       bytes/s       frame          uptime
+```
+
+…and three **tool** screens (MACRO / BAUD / SD-EXPLORER) summoned over CDC1 — these stay put (excluded
+from auto-cycle) so the panel never parks on a menu. The buzzer + NeoPixel give event feedback (wedge =
+alarm + red, recovery = chirp + green, etc.), all driven off the DAP hot path.
+
+---
+
+## How it works (the R1 invariant)
+
+The RP2040 in `debugprobe-v2.2.3` is **single-core** (no SMP), so coexistence is bought with **task
+priority**, not a second core:
+
+```
+priority  high ─────────────────────────────────────────────► low
+          UART bridge / watchdog  >  USB (TUD)  >  DAP  >  dashboard + SD writer
+```
+
+The DAP path is never blocked by anything below it, and nothing above it blocks or takes a DAP-needed
+lock. Cross-task data moves through **single-writer published snapshots** (a seqlock) and **lock-free
+SPSC rings** — never shared mutable structs. Each resource has exactly one owning task (FatFs ↔ SD task,
+OLED/I2C1 ↔ dashboard task, uart0 TX ↔ bridge task). The firmware runs from **flash XIP** (not
+`copy_to_ram`), buying +139 KB of SRAM at identical DAP throughput.
+
+The payoff, measured on hardware: **0 DAP transfer stalls** in every soak — while the SD writer hammers
+the card and the dashboard renders. Full rationale: [`docs/engineering-plan.md`](docs/engineering-plan.md);
+evidence: [`docs/release-readiness.md`](docs/release-readiness.md).
 
 ---
 
 ## Repository layout
 
 ```
-firmware/
-  micropython/   v1 — the current, field-deployable firmware (this README's feature set)
-    main.py        the whole app
-    lib/           vendored drivers (ssd1306; sdcard to be vendored)
-  c/             v2 (planned) — a fork of Raspberry Pi debugprobe that makes the device a
-                 real SWD debug probe AND the Hackagotchi dashboard, in C. See docs/.
-host/
-  hackagotchi_ctl.py   Mac/host CLI: status / freeze / screenshot / clear / watch over USB
-case/              3D-printable "Field Recorder" enclosure (OpenSCAD + notes)
-docs/
-  roadmap.md              product roadmap
-  c-firmware-analysis.md  the build/keep decision for the C rewrite (added when ready)
+firmware/c/          the shipping C firmware (this README)
+  src/               our overlay: probe + bridge + control + recorder + dashboard + reliability
+  boards/            the locked XIAO pin map (board config shim over upstream)
+  tests/             gates/ (Gate 0/1/2) + m1..m4 (HIL + host unit tests)
+  build_fork.sh setup.sh analyze.sh   build / fetch-upstream / static-analysis gate
+firmware/micropython/  legacy v1 prototype (MicroPython)
+docs/                engineering-plan · release-readiness · c-firmware-build · recovery-model · conventions
+.github/workflows/   firmware-c.yml — manual-dispatch build + static-analysis gate + Release
+case/                3D-printable enclosure
 ```
 
-**Status:** the MicroPython firmware (v1) is working and is what's documented below. The big
-next step is the **C firmware** ([`firmware/c/`](firmware/c)) — folding a real hardware SWD
-probe into Hackagotchi so it can *recover* the wedged boards it watches, not just record them.
+## Reliability & evidence
 
-> Extracted from the PicoInky monorepo to stand on its own as a product.
+This project is **gates-first**: the risky architectural claims (does the dashboard starve the probe?
+does the SD writer corrupt a flash? does the 2nd CDC keep DAP enumerating?) were proven on real hardware
+as falsifiable gates *before* any feature work. See [`docs/release-readiness.md`](docs/release-readiness.md)
+for the full CI-automated-vs-HIL-attested evidence table, and `firmware/c/tests/gates/GATE_RESULTS.md`.
 
----
+## Contributing
 
-## 🌟 Visual Layout & Features
+PRs welcome — please read **[`CONTRIBUTING.md`](CONTRIBUTING.md)** first. It covers the fork-overlay
+model (don't edit upstream), the R1 concurrency rules, the gates-first / HIL discipline, and the
+build/test loop.
 
-1. **USB-to-UART Bridge (Screen 0)**:
-   * Bridges USB-CDC with physical UART0.
-   * **Stats panel**: Baud, TX bytes, RX bytes, and **uptime** down the left column.
-   * **Sleeping/Idle Cat Mascot**: A pixel cat curls up to sleep and floats `"z Z Z"` characters if there is no data flow.
-   * **Active Data**: On transfer, the cat wakes up, opens its eyes, moves its mouth, and displays a flashing `TX` or `RX` speech bubble.
-   * **Short Press**: Clears current TX/RX byte statistics.
-2. **Terminal Sniffer Log (Screen 1)**:
-   * Displays a rolling **6-line** terminal log of incoming raw ASCII data (21 cols/line in the compact 5×7 font).
-   * **Short Press**: Toggles between **ASCII Text Mode** (scrolling letters) and **Hex Dump Mode** (**6 rows × 5 bytes** with an ASCII gutter: `HH HH HH HH HH AAAAA`).
-3. **I2C Bus Scanner (Screen 2)**:
-   * Scans the I2C bus (GP6/GP7) in the background every 1.5 seconds. Identifies known sensors (e.g. BMP280, MPU6050, SHT30) and lists their addresses.
-   * **Short Press**: Triggers an immediate re-scan.
-4. **Analog Oscilloscope (Screen 3)**:
-   * Plots a real-time scrolling waveform of the voltage sampled from pin **A0 (GP26)** (0V to 3.3V).
-   * **Calculated Waveform Stats**: Displays **Max Voltage (Vmax)**, **Min Voltage (Vmin)**, **Peak-to-Peak (Vpp)**, and **Signal Frequency (Hz/kHz)** using mathematical zero-crossing edge calculations.
-   * **Short Press**: Cycles through timebases and freeze states:
-     - `1ms/div` (100us sample bursts, total sweep = 8ms)
-     - `10ms/div` (1ms sample bursts, total sweep = 80ms)
-     - `100ms/div` (10ms samples, background sweep = 800ms)
-     - `FREEZE` (holds the last captured sweep snapshot)
-5. **GPIO State Monitor (Screen 4)**:
-   * Displays a real-time high/low status grid of all 11 physical pins on the XIAO header.
-   * **Short Press**: Moves the cursor (`>`) to highlight a specific pin.
-   * **Interactive Logic Probe**: If you let the cursor stay on a pin, it enters a dedicated **Logic Analyzer Probe screen** that draws a 1-bit scrolling waveform chart (High/Low) over time for that pin. Short-press inside the probe screen to return to the GPIO grid.
-6. **PWM Signal Lab (Screen 5)**:
-   * **PWM Generator (D2 / GP28)**: Outputs a 50% duty-cycle square wave on pin **D2 (GP28)**. Cycles frequencies on short-press: `OFF`, `50Hz`, `100Hz`, `500Hz`, `1kHz`, `5kHz`, `10kHz`, `20kHz`.
-   * **PWM/Duty Meter (D8 / GP2)**: Uses high-speed hardware input timers (`time_pulse_us`) on pin **D8 (GP2)** to measure and display the frequency and duty cycle of any incoming PWM signal in real-time.
-7. **Command Macro Sender (Screen 6)**:
-   * Sends customizable serial macros (loaded from `bridge_cfg.json`) to the target device.
-   * **Demo Mode Trigger**: Select **DEMO MODE** at the bottom of the list and wait 2 seconds to launch the Technical Demo.
-   * **Short Press**: Cycles through options.
-   * **Auto-Apply**: Leaving the cursor on a macro for **2 seconds** transmits the string (`MACRO_TEXT\r\n`) and returns to Screen 0.
-8. **Baud Rate Selector (Screen 7)**:
-   * Selects the active bridge speed (`9600`, `19200`, `38400`, `57600`, `115200`).
-   * **Short Press**: Cycles through options.
-   * **Auto-Apply**: Leaving the cursor on an option for **2 seconds** re-initializes the UART and returns to Screen 0.
-9. **Demo Trigger App (Screen 8)**:
-   * Instantly starts the technical demo or sets up boot configuration settings.
-   * **Short Press**: Cycles through options:
-     - `START NOW`: Starts the Demo Mode immediately.
-     - `BOOT & RUN`: Persistently configures the board to boot directly into Demo Mode, then soft-resets the board.
-     - `< CANCEL`: Cancels and returns to Screen 0.
-   * **Auto-Apply**: Leaving the cursor on an option for **2 seconds** executes the action.
-10. **SD Explorer & Black Box (Screen 9)**:
-    * Mounts a microSD (SPI0: CS **D2/GP28**, SCK **D8/GP2**, MOSI **D9/GP3**, MISO **D10/GP4**) and browses files; the **file viewer** shows 5 lines × 21 cols in the 5×7 font (short-press scrolls).
-    * **Black-box recorder**: `[START LOGGING]` opens an auto-incrementing session file (`log_NNN.txt`) and streams the raw UART telemetry to it, buffered (flush at 64 B / 500 ms). Each session writes a timestamped header and a **60 s heartbeat** marker — so if the target goes silent (a wedge) the last heartbeat bounds when it died. A write error stops the logger and buzzes.
-    * **Autonomous start**: set `{"cfg":{"log_on_boot":true}}` and the board records from power-on — an untethered/overnight capture with nobody to press START.
-    * **Timestamps**: headers/heartbeats use real wall-clock time when the expansion board's **PCF8563 RTC (I2C 0x51)** has a good **CR1220** coin cell; with no/dead cell it falls back to uptime (`+Ns`). The target's own `dbg.log` markers already carry relative-ms times, so the session header is the absolute anchor.
-    * ⚠️ The SD shares pins with the **PWM Lab** (D2/GP28, D8/GP2) — don't run that screen while logging. The UART tap (GP0/GP1) is unaffected, so logging + bridging coexist fine.
-11. **Watchdog — Flight Recorder (Screen 10)**: *the black-box differentiator.* Three always-on background monitors (they run no matter which screen you're viewing) surfaced on one status page:
-    * **Wedge detector**: once the target has been seen alive, going silent for **>8 s** is flagged as a *wedge* — the screen shows `WEDGE @ <time>`, a blinking `!` badge appears on every screen, the buzzer drops a low alarm, and the moment is stamped into the black-box log.
-    * **Freeze-frame**: the target's **last ~96 bytes** before it went dark are kept and shown — its dying words. Captured into the log alongside the wedge stamp.
-    * **Trigger watch**: each completed RX line is scanned for armed substrings (default `ERROR`, `FATAL`, `Traceback`, `panic`, `BUSY-TIMEOUT`). A match chirps, flashes, marks the log (`--- ALERT … ---`), and increments the on-screen hit counter. Set terms with `{"cfg":{"watch":["ERROR","oops"]}}` (≤ 8 terms).
-    * **Short press** = acknowledge (clears the hit count + the wedge flag).
-12. **Throughput Meter (Screen 11)**: a live **bytes/sec** sparkline (auto-scaled, 60 s window) with `now` / `peak` rates and a running `total`. **Short press** resets the meter.
+## License & project model
 
----
+- **Project: GPL-3.0-or-later** (see [`LICENSE`](LICENSE)) — Copyright © 2026 GhostRoboticsLab and the
+  Hackagotchi authors. Same copyleft lineage as Pwnagotchi / Flipper Zero / Meshtastic: use, study,
+  modify, redistribute; derivatives stay GPL.
+- **`firmware/c/` subtree: MIT** (see [`firmware/c/LICENSE`](firmware/c/LICENSE)) — kept MIT so fixes
+  stay rebasable onto upstream `debugprobe`.
+- Third-party components are all permissive (MIT / BSD-3 / Apache-2.0) and attributed in
+  [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) (+ [`firmware/c/THIRD-PARTY-NOTICES.md`](firmware/c/THIRD-PARTY-NOTICES.md)).
 
-## 🕹️ System Controls
+**Open-core:** the firmware is free and forkable; the project is sustained by selling assembled,
+pre-flashed units, the 3D-printed enclosure, and the brand — not by closing the code.
 
-*   **SHORT PRESS (< 400ms)**: Cycles options, clears stats, toggles views, enters logic probes, or acknowledges alerts.
-*   **LONG PRESS (>= 500ms)**: Cycles to the **next tool** through all 12 screens (0 → 1 → … → 11 → 0), each with a distinct animated transition.
-*   **Buzzer Feedback**: 
-    *   *Click*: Plays on button press.
-    *   *Rising pitch slide*: Plays when switching screens.
-    *   *Success chime*: Plays when a Baud rate is applied, a Macro is sent, or config is updated.
-    *   *Flat click*: Plays on cancellations.
+## Acknowledgements
 
----
-
-## 🔌 Pin Configuration & Wiring
-
-Connect the bridge to your target microcontroller (e.g. Raspberry Pi Pico W):
-
-| Expansion Shield Pin | Direction | Target Pin | Function |
-| :--- | :--- | :--- | :--- |
-| **D6** (XIAO TX / GP0) | $\rightarrow$ | Target **RX** | UART Transmit |
-| **D7** (XIAO RX / GP1) | $\leftarrow$ | Target **TX** | UART Receive |
-| **GND** | $\leftrightarrow$ | Target **GND** | Common Ground Reference |
-| **A0** (GP26) | $\leftarrow$ | Test Signal | Oscilloscope Probe Input (0V–3.3V) |
-| **D2** (GP28) | $\rightarrow$ | Test Input | PWM Signal Generator Output |
-| **D8** (GP2) | $\leftarrow$ | Test Signal | PWM & Duty Cycle Meter Input |
-
----
-
-## 💻 Host JSON Configuration Mode
-
-You can configure and **drive** the bridge on-the-fly from your host machine over USB. Any JSON line (`{...}`) is intercepted as a host command; anything else falls through to the target unchanged. `{"cfg": ...}` is saved persistently to `bridge_cfg.json`; two non-persistent commands let a companion app/script control and monitor the bridge over the same port — the cheapest fix for the single-button UX:
-
-- **Jump to any screen** — `{"screen": 4}` (0…11) switches the bridge screen and replies `{"status":"OK","screen":4}`. So you don't have to long-press through every tool to reach one.
-- **Query status** — `{"q":"status"}` replies with a one-line snapshot (no state change): `screen`, `baud`, `tx`/`rx` byte counts, `logging`, `log_file`, `sd`, throughput `tp_peak`, `wedge`, trigger `hits`, `demo`. Lets a host script watch the recorder without reading the OLED.
-- **Pull the freeze-frame** — `{"q":"freeze"}` returns the flight-recorder's last ~96 bytes from the target (its "dying words" before a wedge) as `hex` + printable `ascii`, plus the `wedge` flag/`since` stamp. Retrieve a wedge post-mortem over USB — no OLED, no yanking the microSD.
-- **Reset stats** — `{"clear":true}` zeroes the tx/rx/throughput counters + trigger hits and drops the freeze-frame (mirrors the on-device short-press), for clean scripted captures.
-
-```bash
-echo '{"screen": 3}'    > /dev/cu.usbmodem21201   # jump to the Oscilloscope screen
-echo '{"q":"status"}'   > /dev/cu.usbmodem21201   # -> {"status":"OK","screen":3,"rx":...,"wedge":false,...}
-echo '{"q":"freeze"}'   > /dev/cu.usbmodem21201   # -> {"status":"OK","n":96,"hex":"...","ascii":"..."}
-```
-
-Host-command lines (`{...}`) are intercepted whole and are **not** forwarded to the target — they won't leak bytes onto its RX line.
-
-A companion CLI wraps all of this (auto-detects the bridge port):
-
-```bash
-.venv/bin/python tools/hackagotchi_ctl.py status        # state snapshot
-.venv/bin/python tools/hackagotchi_ctl.py freeze         # hexdump the target's last words
-.venv/bin/python tools/hackagotchi_ctl.py screen 3       # jump to a screen
-.venv/bin/python tools/hackagotchi_ctl.py clear          # reset stats
-.venv/bin/python tools/hackagotchi_ctl.py watch          # live-tail relayed telemetry
-```
-
-#### Examples:
-1.  **Configure Custom Macros**:
-    ```bash
-    echo '{"cfg": {"macros": ["AT", "AT+GMR", "PING", "RESET"]}}' > /dev/cu.usbmodem21201
-    ```
-2.  **Adjust Baudrate**:
-    ```bash
-    echo '{"cfg": {"baud": 9600}}' > /dev/cu.usbmodem21201
-    ```
-3.  **Toggle Demo Mode**:
-    ```bash
-    # Enable Technical Demo Mode:
-    echo '{"cfg": {"demo": true}}' > /dev/cu.usbmodem21201
-    
-    # Disable Technical Demo Mode:
-    echo '{"cfg": {"demo": false}}' > /dev/cu.usbmodem21201
-    ```
-4.  **Configure Reboot to Demo**:
-    ```bash
-    # Configure board to reboot directly into Demo Mode:
-    echo '{"cfg": {"demo_on_boot": true}}' > /dev/cu.usbmodem21201
-    
-    # Disable Demo Mode on boot:
-    echo '{"cfg": {"demo_on_boot": false}}' > /dev/cu.usbmodem21201
-    ```
-5.  **Black box — start/stop recording, and auto-start on boot**:
-    ```bash
-    # Start a new session log now (log_NNN.txt on the SD):
-    echo '{"cfg": {"logging": true}}'  > /dev/cu.usbmodem21201
-    echo '{"cfg": {"logging": false}}' > /dev/cu.usbmodem21201
-
-    # Record automatically from power-on (untethered black box):
-    echo '{"cfg": {"log_on_boot": true}}'  > /dev/cu.usbmodem21201
-    echo '{"cfg": {"log_on_boot": false}}' > /dev/cu.usbmodem21201
-    ```
-6.  **Trigger watch — beep/flag when the target says something**:
-    ```bash
-    # Up to 8 substrings; each completed RX line is scanned for them.
-    echo '{"cfg": {"watch": ["ERROR", "FATAL", "Guru Meditation"]}}' > /dev/cu.usbmodem21201
-    echo '{"cfg": {"watch": []}}' > /dev/cu.usbmodem21201   # disable
-    ```
-7.  **Hardware watchdog — auto-reboot on a true CPU hang (untethered)**:
-    ```bash
-    # Armed at the NEXT boot (kept off by default so it can't trip a slow reflash).
-    echo '{"cfg": {"wdt": true}}'  > /dev/cu.usbmodem21201
-    echo '{"cfg": {"wdt": false}}' > /dev/cu.usbmodem21201
-    ```
-The board will chime and return a JSON status line confirming the updated config
-(it includes `logging`, `log_on_boot`, `log_file`, `watch`, and `wdt`).
-
----
-
-## 🎮 Driving the PicoInky (reverse channel)
-
-The bridge transmits to the target's RX (**D6 / GP0 → Pico GP1**), and PicoInky firmware
-(≥ the stock-MicroPython base) listens there for **single-character control commands** —
-a refresh-immune control plane that works *during* an e-paper refresh or TLS fetch, when a
-USB raw-REPL break-in would fail. Bytes are dispatched by `App._drain_uart_cmds`; acks come
-back as `cmd ...` lines on the telemetry stream (visible in the Sniffer screen):
-
-| Key | Action |
-| :-- | :--- |
-| `n` / `p` | Next / previous page |
-| `r` | Mark all feeds due → refetch on the next poll |
-| `g` | `gc.collect()` then report free / allocated RAM |
-| `d` | Dump a compact state snapshot (page, key list, free RAM) |
-| `R` | Reboot the Pico |
-| `B` | Drop the Pico into **BOOTSEL** (UF2 bootloader) for a remote flash — works when USB-CDC is wedged and no one can press the button; the host then runs `picotool load` over the resulting BOOTSEL USB |
-
-Send them either from the host (`echo -n n > /dev/cu.usbmodem21201`) or straight from the
-bridge by loading them as **macros** (Screen 6): `{"cfg": {"macros": ["n", "p", "r", "g", "d"]}}`.
-
-### Host-side telemetry tools (in the PicoInky repo's `tools/`)
-
-Two Mac-side helpers turn the raw tap stream into something you can actually read. Run them
-with the project venv (they need `pyserial`):
-
-```bash
-# Flash the Pico, then live-watch its DECODED boot/telemetry through the tap.
-# Auto-detects which port is the XIAO bridge (by its marker traffic) and which is the target.
-.venv/bin/python tools/flash_and_watch.py                 # detect → deploy → watch
-.venv/bin/python tools/flash_and_watch.py --no-flash      # just watch the tap
-.venv/bin/python tools/flash_and_watch.py --no-flash --reboot   # reboot via tap, then watch
-
-# The decoder on its own: live (port/stdin/--tail) or a post-mortem of a black-box log.
-.venv/bin/python tools/markerdecode.py --port /dev/cu.usbmodem21201   # live, colourised
-.venv/bin/python tools/markerdecode.py /sd/log_007.txt               # post-mortem summary
-```
-
-`markerdecode.py` understands the `dbg.log` grammar (`<ms> <body>`): it pairs each `uc>` e-ink
-refresh with its `uc<` (an unmatched one before a reboot = the canonical standalone wedge),
-tracks the `free=` RAM floor, and flags `FATAL` / `BUSY-TIMEOUT` / `EXC` / `ENOMEM`. Point it at
-a `log_NNN.txt` off this bridge's SD card and it prints "where did it die and why" in one shot.
-
----
-
-## 🎬 Technical Demo Mode
-
-Demo Mode is a comprehensive visual demonstration designed to show off all of the bridge's capabilities under a simulated full load. 
-
-*   **Activation**: Triggered by waiting 2 seconds on the **DEMO MODE** macro item, using the **Demo Trigger App (Screen 8)** (`START NOW` or `BOOT & RUN`), or by sending `{"cfg": {"demo": true}}` or `{"cfg": {"demo_on_boot": true}}` over USB CDC.
-*   **Behavior**: It automatically cycles through all 9 screens, displaying each state for **7 seconds**.
-*   **Simulated Loads**:
-    *   **Screen 0 (Mascot/Stats)**: Shows simulated byte transfers, updating the RX/TX statistics while the mascot wakes up and flashes speech bubbles.
-    *   **Screen 1 (Sniffer)**: Automatically alternates between ASCII RX logging and Hex Sniffer modes on each cycle, displaying a simulated stream of incoming telemetry and command responses.
-    *   **Screen 2 (I2C Scanner)**: Lists a mockup of active I2C addresses on the bus.
-    *   **Screen 3 (Oscilloscope)**: Displays a smooth math-generated sine wave, calculating frequency and voltage stats in real-time.
-    *   **Screen 4 (GPIO Monitor)**: Simulates active logic level states across headers, alternating between the grid view and a pulsing 1-bit scrolling Logic Probe view on pin D0.
-    *   **Screen 5 (PWM Lab)**: Illustrates a stable PWM wave input (1.0kHz @ 50.0% duty) alongside generator animation.
-    *   **Screen 6/7 (Menus)**: Animates the selection cursor cycling through options to demonstrate navigation.
-    *   **Screen 8 (Demo Trigger)**: Cycles the selection highlight between trigger commands.
-*   **Interaction**: Pressing the physical button (short or long press) at any point during the demo **instantly exits** Demo Mode and resets the device.
-
----
-
-## 📜 License
-
-Hackagotchi is **open source**.
-
-* The project's own code is licensed **[GPL-3.0-or-later](LICENSE)** — the same license as
-  its lineage (Pwnagotchi, Flipper Zero, Meshtastic). You may use, study, modify, and
-  redistribute it; derivatives and commercial forks must also be GPL-3.0 (a copyleft
-  "leash" against closed clones).
-* **Exception:** the v2 `firmware/c/` subtree is a fork of Raspberry Pi's MIT-licensed
-  [`debugprobe`](https://github.com/raspberrypi/debugprobe) and is kept under
-  **[MIT](firmware/c/LICENSE)** so fixes stay upstream-compatible.
-* Bundled and build-time third-party components remain under their own permissive
-  licenses (MIT / BSD-3-Clause / Apache-2.0) — see **[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)**.
-
-**Open-core model:** the firmware is free and forkable; the project is sustained by selling
-assembled, pre-flashed units, the 3D-printed enclosure, the v2 SWD-recovery tier, and the
-"Hackagotchi" brand — not by closing the code.
+Built on the shoulders of [`raspberrypi/debugprobe`](https://github.com/raspberrypi/debugprobe), the
+[Raspberry Pi Pico SDK](https://github.com/raspberrypi/pico-sdk), [TinyUSB](https://github.com/hathach/tinyusb),
+[FreeRTOS](https://www.freertos.org/), [carlk3's no-OS-FatFS](https://github.com/carlk3/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico),
+ChaN's [FatFs](http://elm-chan.org/fsw/ff/), [daschr/pico-ssd1306](https://github.com/daschr/pico-ssd1306),
+and [zserge/jsmn](https://github.com/zserge/jsmn). 🐾
