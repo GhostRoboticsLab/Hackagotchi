@@ -90,7 +90,8 @@ SECTIONS
          * so their .text lands in RAM (via the .data section below) — XIP-contention fix. */
         *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a:
             *DAP.c.o *sw_dp_pio.c.o *probe.c.o *tusb_edpt_handler.c.o
-            *usbd.c.o *vendor_device.c.o *dcd_rp2040.c.o) .text*)
+            *usbd.c.o *vendor_device.c.o *dcd_rp2040.c.o
+            *dap_health.c.o) .text*)  /* dap_health.c.o: the --wrap DAP witness, if present (no-op when absent) */
         *(.fini)
         /* Pull all c'tors into .text */
         *crtbegin.o(.ctors)
