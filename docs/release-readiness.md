@@ -22,7 +22,7 @@ image* (not a per-increment dev build).
 | Footprint | `.text` 110516 B (flash XIP) · `.data` 18832 B copied to **SRAM** at boot (incl. the ~18.8 KB pinned DAP/USB hot path) · `.bss` 82068 B |
 | Attested artifact | `.uf2` sha256 `b0826090…d683` · `.elf` sha256 `56c5c975…5bec` |
 | Gate | `analyze.sh` **PASS** (exit 0); the 7 DAP/USB transaction objects verified resident in SRAM (`nm`: `0x2000xxxx`), i.e. the pin took effect in the binary |
-| Published | tag **`v1.1`** · Release pending push (`.uf2` + `.elf` + NOTICE + LICENSE) · 2026-06-22 |
+| Published | **tag `v1.1` @ `29fddde`** · [Release](https://github.com/GhostRoboticsLab/Hackagotchi/releases/tag/v1.1) — **immutable**, latest (`.uf2` + `.elf` + `THIRD-PARTY-NOTICES.md` + MIT `LICENSE`) · 2026-06-22. The published `.uf2` downloads back to sha256 `b0826090…d683`, byte-identical to the attested artifact and a clean reproducible rebuild from `29fddde`. |
 | Tag scheme | per v1.0: GitHub immutable-releases reserve a tag name permanently, so semver `1.1.0` ships under the short tag **`v1.1`** (the `1.1.x` tag space stays open for patch re-cuts). |
 
 ## Section 0 — v1.1 delta: the XIP-cache-contention finding + `HG_PIN_DAP` fix
