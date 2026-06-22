@@ -127,6 +127,8 @@ def _print_status(st):
         print("(no reply)")
         return
     print("Hackagotchi  screen=%s  baud=%s  demo=%s" % (st.get("screen"), st.get("baud"), st.get("demo")))
+    if st.get("dap_xfers") is not None:
+        print("  probe    dap_xfers=%-8s dap_idle_ms=%s" % (st.get("dap_xfers"), st.get("dap_idle_ms")))
     print("  bytes    tx=%-8s rx=%-8s  throughput peak=%s B/s" % (st.get("tx"), st.get("rx"), st.get("tp_peak")))
     print("  recorder logging=%s  file=%s  sd=%s" % (st.get("logging"), st.get("log_file"), st.get("sd")))
     wedge = st.get("wedge")

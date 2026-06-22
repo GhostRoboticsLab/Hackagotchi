@@ -85,6 +85,7 @@ add_executable(hackagotchi_probe
         ${CMAKE_CURRENT_LIST_DIR}/src/i2c1_bus.c             # I2C1 bring-up (OLED-only, FM+ 1 MHz, no mutex)
         ${CMAKE_CURRENT_LIST_DIR}/src/feedback.c             # M3.0: status LEDs (GP17/16) + buzzer (GP29) HAL
         ${CMAKE_CURRENT_LIST_DIR}/src/hg_config.c            # M4: runtime config store (macros, baud)
+        ${CMAKE_CURRENT_LIST_DIR}/src/dap_health.c           # DAP transfer/health witness (via --wrap below)
         # --- pristine upstream debugprobe sources ---
         ${UPSTREAM}/src/probe_config.c
         ${UPSTREAM}/src/probe.c
@@ -114,6 +115,13 @@ target_include_directories(hackagotchi_probe PRIVATE
 )
 
 target_compile_options(hackagotchi_probe PRIVATE -Wall)
+
+# [HACKAGOTCHI] DAP health telemetry — intercept the DAP execute call WITHOUT shadowing the upstream
+# tusb_edpt_handler.c: --wrap renames DAP_ExecuteCommand to __real_DAP_ExecuteCommand and routes calls
+# through our __wrap_DAP_ExecuteCommand (src/dap_health.c), which counts each completed command. Keeps
+# the upstream re-diff surface at zero (the wrap survives a debugprobe bump as long as the CMSIS-DAP
+# symbol exists). DAP-PATH change — must be re-gated before merge.
+target_link_options(hackagotchi_probe PRIVATE -Wl,--wrap=DAP_ExecuteCommand)
 
 # PIO headers (probe.pio.h / probe_oen.pio.h) — generated from the pristine upstream PIO.
 pico_generate_pio_header(hackagotchi_probe ${UPSTREAM}/src/probe.pio)

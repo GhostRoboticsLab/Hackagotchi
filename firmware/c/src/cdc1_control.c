@@ -37,6 +37,7 @@
 #include "sd_gate.h"                // M2: SD bring-up self-test result ({"q":"sd"})
 #include "feedback.h"               // M3.0: LED/buzzer HW-reconciliation test commands
 #include "hg_config.h"              // M4.2: macro list ({"q":"macros"} / {"q":"macro"})
+#include "dap_health.h"             // DAP transfer/health witness ({"q":"status"} dap_xfers/dap_idle_ms)
 
 // Build-discriminating tags compiled into the status reply so the RUNNING firmware proves its OWN
 // identity (closes the Gate-1 provenance gap). Mirror the CMake -D flags (PRIVATE on the target).
@@ -79,10 +80,11 @@ static void reply(uint8_t itf, const char *s) {
 // reentrant) TUD task, and ~0.5 KB of JSON locals on the small USB task stack overflows it (corrupts
 // the USB endpoint state -> the host sees ENXIO). Keep big buffers off this stack.
 static void write_status(uint8_t itf) {
-  static char r[256];
+  static char r[320];
   int len = snprintf(r, sizeof r,
                      "{\"fw\":\"Hackagotchi\",\"ver\":\"%s\",\"heap\":%u,\"up\":%u,\"n\":%u,"
                      "\"stall_cfg\":%d,\"stall_us\":%u,\"prio\":%d,"
+                     "\"dap_xfers\":%u,\"dap_idle_ms\":%u,"
                      "\"crashes\":%u,\"wd_armed\":%d,\"wd_gap\":%u,\"tud\":%u,\"page\":%d,"
                      "\"urx_drop\":%u,\"urx_hw\":%u,\"utx_drop\":%u,\"frag\":%u}\n",
                      HG_VERSION,
@@ -90,6 +92,7 @@ static void write_status(uint8_t itf) {
                      (unsigned) (time_us_64() / 1000000ull),
                      (unsigned) g_dash_counter, (int) ADVERSARIAL_STALL_MS,
                      (unsigned) g_dash_stall_us, (int) HACKA_DASH_PRIO,
+                     (unsigned) dap_health_xfers(), (unsigned) dap_health_idle_ms(),
                      (unsigned) crash_box_count(), (int) wd_is_armed(), (unsigned) wd_max_gap_ms(),
                      (unsigned) g_tud_checkin, (int) g_dash_screen,
                      (unsigned) uart_bridge_drops(), (unsigned) uart_bridge_highwater(),
