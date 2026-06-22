@@ -27,6 +27,7 @@
 #include "sd_gate.h"      // rec_snapshot_t + dash_get_rec_snapshot()
 #include "hackagotchi_dashboard.h"
 #include "sprites.gen.h"  // M-UI-2: generated 1-bit sprites (status-bar glyphs + ghost vitals states)
+#include "hg_input.h"     // v1.2: poll the joystick here (shares the OLED's I2C1 owner -> no mutex)
 
 #ifndef DASH_I2C_ADDR
 #define DASH_I2C_ADDR 0x3Cu
@@ -604,6 +605,7 @@ void dashboard_task(void *ptr) {
     for (;;) {
         uint32_t now = (uint32_t)(time_us_64() / 1000ull);
         g_dash_counter++;
+        hg_joystick_poll(now);   // v1.2: read the ADS1115 joystick (no-op unless HG_JOYSTICK) -> nav intents
         if (__atomic_exchange_n(&s_exorcise_req, 0, __ATOMIC_RELAXED)) s_exorcise_frames = 10;  // M-UI-5: arm exorcism
 
 #if ADVERSARIAL_STALL_MS > 0

@@ -22,6 +22,7 @@
 #include "feedback.h"      // M3.0: non-blocking LED/buzzer service (serviced from this low-prio task)
 #include "hg_config.h"     // M4.5: persisted baud + macros (KV config file on the SD card)
 #include "hackagotchi_dashboard.h"   // M4.1: dash_hex_mode() — gate the per-loop raw-tail copy
+#include "hg_input.h"                // v1.2: poll the button here (20 ms, GPIO only — no bus, no mutex)
 
 TaskHandle_t sd_gate_taskhandle;
 
@@ -273,11 +274,25 @@ static void drive_feedback(void) {
         if (err && !last_err)             { feedback_beep(500, 700);  s_faults++;  }  // SD write/full fault -> buzz
         if (st.hits > last_hits)          feedback_beep(2600, 70);    // trigger-term hit -> blip
     }
+#if defined(HG_NEOPIXEL_COUNT) && (HG_NEOPIXEL_COUNT > 1)
+    // v1.2 "Companion": an external WS2812 chain shows a reactive MOOD instead of a single status colour.
+    // fault > recent-traffic > logging > off. RX latches for 1.5 s so the green pulse outlives a burst.
+    static uint32_t active_until = 0, last_rx_total = 0;
+    uint32_t now = (uint32_t)(time_us_64() / 1000ull);
+    if (st.rx_total > last_rx_total) { active_until = now + 1500u; last_rx_total = st.rx_total; }
+    int mood = (st.wedge || err)     ? NP_MOOD_FAULT
+             : (now < active_until)  ? NP_MOOD_RX
+             : (st.logging)          ? NP_MOOD_IDLE
+                                     : NP_MOOD_OFF;
+    feedback_mood(mood, 200);
+    (void)last_color;
+#else
     uint32_t color = (st.wedge || err) ? 0x400000u : (st.logging ? 0x001000u : 0u);  // red / dim green / off
     if (color != last_color) {
         feedback_pixel((uint8_t)(color >> 16), (uint8_t)(color >> 8), (uint8_t)color);
         last_color = color;
     }
+#endif
     last_wedge = st.wedge; last_err = err; last_hits = st.hits; last_rx = rx_seen; first = false;
 }
 
@@ -311,6 +326,7 @@ void sd_gate_task(void *ptr) {
         if (s_cfg_save_req) { do_config_save(); s_cfg_save_req = false; }   // M4.5 persist on change
         publish_snapshot();          // M3: hand the dashboard + CDC1 a consistent copy of recorder state
         drive_feedback();            // M3.3: map recorder events -> buzzer + NeoPixel (edge-detected)
+        hg_button_poll(now);         // v1.2: debounce the GP16 button (no-op unless HG_BUTTON) -> nav/pet
         feedback_service(now);       // M3.0: apply the latched beep/pixel + buzzer-off, off the hot path
         vTaskDelay(pdMS_TO_TICKS(20));
     }

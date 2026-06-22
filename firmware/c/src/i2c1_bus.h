@@ -16,7 +16,14 @@
 #define I2C1_BUS_INST i2c1
 #define I2C1_BUS_SDA  6u
 #define I2C1_BUS_SCL  7u
-#define I2C1_BUS_HZ   1000000u   // Fast-mode Plus; was 400000u (Fast-mode) while shared with the RTC
+// Fast-mode Plus (1 MHz) when the OLED is the sole device; drop to Fast-mode (400 kHz) when an ADS1115
+// joystick shares the Grove bus (ADS1115 max is 400 kHz). The OLED full-frame flush slows ~9 ms -> ~23 ms,
+// which is fine on the +0 dashboard task. v1.0 era ran the whole bus at 400 kHz, soak-proven.
+#if defined(HG_JOYSTICK) && (HG_JOYSTICK)
+#define I2C1_BUS_HZ   400000u    // Fast-mode (ADS1115 on the shared Grove bus)
+#else
+#define I2C1_BUS_HZ   1000000u   // Fast-mode Plus; OLED is the sole device
+#endif
 
 void i2c1_bus_init(void);        // idempotent: i2c_init + gpio funcs + pullups (no mutex — single owner)
 
