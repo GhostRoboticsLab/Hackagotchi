@@ -20,8 +20,9 @@ PICO_SDK_PATH="${PICO_SDK_PATH:-$FW_BUILD_DIR/micropython/lib/pico-sdk}"
 BUILD_DIR="${BUILD_DIR:-$HERE/build}"
 ADVERSARIAL_STALL_MS="${ADVERSARIAL_STALL_MS:-0}"
 ADVERSARIAL_AT_DAP_PRIO="${ADVERSARIAL_AT_DAP_PRIO:-OFF}"
-# Pin the DAP/USB transaction hot path into SRAM (XIP-cache-contention fix). Default OFF = stock XIP image.
-HG_PIN_DAP="${HG_PIN_DAP:-OFF}"
+# Pin the DAP/USB transaction hot path into SRAM (XIP-cache-contention fix). ON = v1.1+ shipping default;
+# set HG_PIN_DAP=OFF to reproduce the pre-fix XIP image for an A/B soak.
+HG_PIN_DAP="${HG_PIN_DAP:-ON}"
 # M5: release semver compiled into the firmware (reported by {"q":"status"} as "ver"). Override with
 # VERSION=1.0.0 ./build_fork.sh ; CI passes the workflow `version` input. Default = untagged dev build.
 HG_VERSION="${VERSION:-${HG_VERSION:-0.0.0-dev}}"

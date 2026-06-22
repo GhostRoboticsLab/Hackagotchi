@@ -41,9 +41,10 @@ option(ADVERSARIAL_AT_DAP_PRIO "Run the OLED stress task at DAP priority (advers
 # render loop churns the shared 16 KB XIP cache and evicts the flash-resident DAP framing path, adding
 # QSPI refill latency inside the USB-IN response window -> retryable DAP framing desyncs (0 stalls;
 # ~7-15x rate vs v1.0). When ON, a custom linker script (memmap_hackagotchi_pin.ld) routes those 7
-# objects' .text to RAM. Residency change ONLY — no FreeRTOS priority change. Default OFF =
-# byte-identical to the stock XIP product image. See docs/firmware-conventions.md / release-readiness.
-option(HG_PIN_DAP "Pin the DAP/USB transaction hot path into SRAM (XIP-cache-contention fix)" OFF)
+# objects' .text to RAM. Residency change ONLY — no FreeRTOS priority change. ON is the v1.1+ shipping
+# default (the UI overhaul needs it to hold the v1.0 DAP retryable rate; pinned image soaks 0/500).
+# Set HG_PIN_DAP=OFF to reproduce the pre-fix XIP image for an A/B soak. See docs/firmware-conventions.md.
+option(HG_PIN_DAP "Pin the DAP/USB transaction hot path into SRAM (XIP-cache-contention fix)" ON)
 
 # M5: firmware semver compiled into the {"q":"status"} reply so a flashed board self-identifies its
 # release (the git tag / artifact name alone is NOT in the binary). build_fork.sh threads VERSION here;
