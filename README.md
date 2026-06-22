@@ -100,8 +100,11 @@ Send `{"q":"<cmd>", ...}\n`; you get one JSON line back.
 | **Tools** | `{"q":"macros"}` / `{"q":"macro","i":N}` | list / send a predefined string out the target UART |
 | | `{"q":"setmacro","i":N,"s":"..."}` | set macro N (persisted to SD) |
 | | `{"q":"baud","v":N}` | change the target-UART baud (validated set; persisted) |
-| **Feedback** | `{"q":"beep"}` / `{"q":"led",...}` / `{"q":"pixel",...}` | buzzer / status LEDs / NeoPixel |
+| **Feedback** | `{"q":"beep"}` / `{"q":"led",...}` / `{"q":"pixel",...}` | buzzer / status LEDs / NeoPixel (pixel 0) |
 | | `{"q":"fb"}` | feedback-layer readback — beep count + live NeoPixel colour (diagnostic) |
+| **Companion (v1.2)** | `{"q":"fill","r":..,"g":..,"b":..}` | set the whole WS2812 chain to one colour |
+| | `{"q":"mood","n":0..6,"i":0..255}` | animated mood: off / idle / rx / warn / fault / pet / rainbow |
+| | `{"q":"btn"}` / `{"q":"joy"}` | button + joystick readback (held / taps; present / X / Y / dir) |
 | **Companion** | `{"q":"pet"}` | a happy cat beat (heart + chirp) |
 | | `{"q":"summon"}` / `{"q":"banish"}` | force the ghost present / absent (also lets tests drive it) |
 | | `{"q":"exorcise"}` | the exorcism dissolve — a host flasher fires it after a clean reflash |
