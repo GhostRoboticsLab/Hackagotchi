@@ -10,7 +10,7 @@
 // │   GP0  (D6)  UART0 TX  -> target tap            GP1  (D7)  UART0 RX  -> target tap      │
 // │   GP2  (D8)  SD SPI SCK                          GP3  (D10) SD SPI MOSI                 │
 // │   GP4  (D9)  SD SPI MISO                         GP28 (D2)  SD CS                       │
-// │   GP6  (D4)  I2C1 SDA (OLED 0x3C + RTC 0x51)     GP7  (D5)  I2C1 SCL                    │
+// │   GP6  (D4)  I2C1 SDA (OLED 0x3C only)           GP7  (D5)  I2C1 SCL                    │
 // │   GP26 (D0)  green LED / ADC                     GP27 (D1)  user button                 │
 // │   GP29 (D3)  buzzer (PWM)                        GP25 onboard blue LED (no pad)         │
 // └──────────────────────────────────────────────────────────────────────────────────────┘
