@@ -20,12 +20,12 @@ on:
       - 'firmware/c/tests/**'
       - 'host/**'
       - '.github/workflows/host-tests.yml'
+  # No paths filter on pull_request: the "Portable logic (no hardware)" job is a REQUIRED
+  # status check (repo ruleset), so it must report on EVERY PR. A path-filtered required
+  # check that never runs leaves a PR blocked on a forever-pending "Expected" status. This
+  # runner is GitHub-hosted (free + unlimited for public repos) and uploads nothing, so
+  # running it on docs-only PRs costs nothing. (push stays path-filtered to save branch runs.)
   pull_request:
-    paths:
-      - 'firmware/c/src/**'
-      - 'firmware/c/tests/**'
-      - 'host/**'
-      - '.github/workflows/host-tests.yml'
 
 concurrency:
   group: host-tests-${{ github.ref }}
