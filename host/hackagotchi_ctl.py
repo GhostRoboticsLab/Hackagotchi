@@ -17,6 +17,7 @@
 # Pure host-side: stdlib + pyserial, no device risk.
 
 import sys
+import re
 import glob
 import time
 import json
@@ -148,6 +149,106 @@ def _print_freeze(fr):
         print("  %04x  %-47s  %s" % (i, " ".join(row), asc[i:i + 16]))
 
 
+def _query_fresh(s, obj, want, settle=0.45):
+    """For the async SD verbs (`ls`/`cat`/`tail`): the firmware returns the PREVIOUS result and
+    queues a fresh read serviced off the DAP hot path by the low-prio SD task (R1 — FatFs is never
+    touched from the control path). So query once to trigger the read, let the SD task run, then
+    query again and return that now-fresh result."""
+    _query(s, obj, wait=1.0, want=want)     # trigger; returns the stale previous result
+    time.sleep(settle)                       # let the SD task service the queued read
+    return _query(s, obj, wait=2.0, want=want)
+
+
+def _log_index(name):
+    """'log_007.txt' -> 7. The cat verb addresses logs by NUMBER (i:7 -> log_007.txt), not by
+    list position, so `ls` advertises the number to pass to `cat`."""
+    m = re.search(r"log_(\d+)\.txt", name or "")
+    return int(m.group(1)) if m else None
+
+
+def _print_lastfault(r):
+    if not r or "fault" not in r:
+        print("(no reply)")
+        return
+    f = r.get("fault")
+    if not f or f in ({}, "null", "none"):
+        print("no fault recorded (clean since last boot)")
+        return
+    print(json.dumps(f, indent=2) if isinstance(f, (dict, list)) else f)
+
+
+def _print_baud(r):
+    if not r:
+        print("(no reply)")
+        return
+    if "err" in r:
+        print("failed: %s (try one of the advertised options)" % r["err"])
+        return
+    opts = r.get("opts")
+    if opts:
+        print("baud=%s   options: %s" % (r.get("baud"), ", ".join(str(o) for o in opts)))
+    else:
+        print("baud set to %s" % r.get("baud"))
+
+
+def _print_ls(r):
+    if not r or "ls" not in r:
+        print("(no reply)")
+        return
+    files = r.get("ls") or []
+    print("SD logs: %s total, %s shown" % (r.get("n", len(files)), r.get("shown", len(files))))
+    if not files:
+        print("  (none)")
+        return
+    for name in files:
+        idx = _log_index(name)
+        print("  %-16s  %s" % (name, ("-> cat %d" % idx) if idx is not None else ""))
+
+
+def _print_macros(r):
+    if not r or "macros" not in r:
+        print("(no reply)")
+        return
+    macros = r.get("macros") or []
+    if not macros:
+        print("  (no macros configured)")
+        return
+    for i, m in enumerate(macros):
+        print("  [%d] %r" % (i, m))
+
+
+def _do_bootsel(s, port):
+    """Send {"q":"bootsel"} — the firmware calls reset_usb_boot() immediately, so there is NO
+    reply and the control port re-enumerates as the BOOTSEL mass-storage device. Don't wait for
+    a reply (waiting would just time out on a vanished port)."""
+    try:
+        s.write(b'{"q":"bootsel"}\n')
+        s.flush()
+    except Exception:
+        pass     # the port may already be tearing down — expected
+    print("sent bootsel: %s is dropping to BOOTSEL (no reply expected)." % port)
+    print("the device is now USB mass-storage 'RPI-RP2'. flash it with:")
+    print("    picotool load -x firmware/c/build/hackagotchi_probe.uf2")
+
+
+def _cat(s, idx, off, read_all):
+    """Read SD log #idx. With read_all, page through to EOF (off advances by each chunk's len)."""
+    total = 0
+    while True:
+        r = _query_fresh(s, {"q": "cat", "i": idx, "off": off}, want="file")
+        if not r or "file" not in r:
+            print("\n(no reply at off=%d)" % off)
+            return
+        data = r.get("data") or ""
+        sys.stdout.write(data)
+        ln = r.get("len", len(data))
+        total += ln
+        if not read_all or r.get("eof") or ln == 0:
+            break
+        off = r.get("off", off) + ln
+    sys.stdout.flush()
+
+
 def _capture_shot(s, wait=9.0):
     """Send 'S' (a Pico reverse-channel command, char-forwarded through the bridge) and
     collect the framebuffer dump: a `SS> w=.. h=.. n=..` header, raw `SSD <b64>` data lines,
@@ -240,6 +341,24 @@ def main():
     sp = sub.add_parser("screen", help="jump the bridge to a screen (0..11)")
     sp.add_argument("n", type=int)
     sub.add_parser("clear", help="reset tx/rx/throughput/hits + freeze-frame")
+    # --- post-mortem / maintenance ---
+    sub.add_parser("lastfault", help="print the post-mortem crash box (survives a reboot)")
+    sub.add_parser("dump", help="crash box + status, in one shot")
+    sub.add_parser("bootsel", help="reset to BOOTSEL for a hands-free reflash (port drops; then picotool load -x)")
+    # --- target UART ---
+    bp = sub.add_parser("baud", help="read, or set, the target-UART baud")
+    bp.add_argument("rate", nargs="?", type=int, help="new baud (omit to read current + valid options)")
+    mp = sub.add_parser("macro", help="list macros, or send macro N out the target UART")
+    mp.add_argument("i", nargs="?", type=int, help="macro index to send (omit to list)")
+    # --- SD card / recorder ---
+    sub.add_parser("sd", help="SD mount + bring-up status")
+    sub.add_parser("rec", help="recorder state")
+    sub.add_parser("tail", help="the on-card log tail")
+    sub.add_parser("ls", help="list the SD card's log files")
+    cp = sub.add_parser("cat", help="read an SD log by NUMBER (e.g. 'cat 7' -> log_007.txt)")
+    cp.add_argument("n", type=int, help="log number (the index shown by 'ls')")
+    cp.add_argument("--off", type=int, default=0, help="start byte offset (default 0)")
+    cp.add_argument("--all", action="store_true", help="page through the whole file to EOF")
     w = sub.add_parser("watch", help="live-tail the relayed telemetry (Ctrl-C to stop)")
     w.add_argument("--seconds", type=float, default=0, help="auto-stop after N seconds (0 = until Ctrl-C)")
     sh = sub.add_parser("shot", help="screenshot the Pico's e-ink over the tap -> PNG")
@@ -262,6 +381,38 @@ def main():
         elif args.cmd == "clear":
             r = _query(s, {"clear": True}, want="cleared")
             print("cleared" if r and r.get("cleared") else "failed: %s" % r)
+        elif args.cmd == "lastfault":
+            _print_lastfault(_query(s, {"q": "lastfault"}, want="fault"))
+        elif args.cmd == "dump":
+            _print_lastfault(_query(s, {"q": "lastfault"}, want="fault"))
+            print("---")
+            _print_status(_query(s, {"q": "status"}))
+        elif args.cmd == "bootsel":
+            _do_bootsel(s, port)
+        elif args.cmd == "baud":
+            if args.rate is None:
+                _print_baud(_query(s, {"q": "baud"}, want="baud"))
+            else:
+                _print_baud(_query(s, {"q": "baud", "v": args.rate}, want=None))
+        elif args.cmd == "macro":
+            if args.i is None:
+                _print_macros(_query(s, {"q": "macros"}, want="macros"))
+            else:
+                r = _query(s, {"q": "macro", "i": args.i}, want=None)
+                if r and "sent" in r:
+                    print("sent macro %d: %r" % (r["sent"], r.get("macro")))
+                else:
+                    print("failed: %s" % r)
+        elif args.cmd in ("sd", "rec"):
+            r = _query(s, {"q": args.cmd}, want=None)
+            print(json.dumps(r, indent=2) if r else "(no reply)")
+        elif args.cmd == "tail":
+            r = _query_fresh(s, {"q": "tail"}, want="tail")
+            print((r or {}).get("tail", "(no reply)"))
+        elif args.cmd == "ls":
+            _print_ls(_query_fresh(s, {"q": "ls"}, want="ls"))
+        elif args.cmd == "cat":
+            _cat(s, args.n, args.off, args.all)
         elif args.cmd == "shot":
             w_, h_, raw = _capture_shot(s)
             _render_shot(w_, h_, raw, args.out, args.scale)

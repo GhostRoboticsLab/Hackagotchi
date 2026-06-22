@@ -1,6 +1,8 @@
 # Python (host tooling)
 __pycache__/
 *.pyc
+# .venv matches both the venv dir and the firmware/c/.venv -> ../../.venv symlink setup-venv.sh makes
+.venv
 .venv/
 
 # MicroPython cross-compiled bytecode

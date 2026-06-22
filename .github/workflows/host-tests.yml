@@ -1,10 +1,11 @@
 name: Host unit tests
 
 # GitHub-HOSTED, push/PR — the complement to firmware-c.yml (which is manual-only, self-hosted, and
-# does build + analyze.sh ONLY). These three tests cover the load-bearing PORTABLE logic — the SPSC
-# ring, the recorder wedge/heartbeat state machine, and the 1-bit sprite blit — and need no probe, so
-# they run unattended on a hosted runner. This is the repo's first community-runnable green check:
-# an external contributor gets a real test signal without the pinned local Arm GCC + pico-sdk toolchain.
+# does build + analyze.sh ONLY). These tests cover the load-bearing PORTABLE logic — the SPSC ring, the
+# recorder wedge/heartbeat state machine, the 1-bit sprite blit, and the host CLI's reply parsing /
+# dispatch — and need no probe, so they run unattended on a hosted runner. This is the repo's first
+# community-runnable green check: an external contributor gets a real test signal without the pinned
+# local Arm GCC + pico-sdk toolchain.
 #
 # Each test is run TWICE: the real build (must PASS, exit 0) and its verify-the-verifier break build
 # (-D*_SELFTEST_BREAK, must FAIL / exit nonzero). The break run is the point — it proves the harness can
@@ -17,11 +18,13 @@ on:
     paths:
       - 'firmware/c/src/**'
       - 'firmware/c/tests/**'
+      - 'host/**'
       - '.github/workflows/host-tests.yml'
   pull_request:
     paths:
       - 'firmware/c/src/**'
       - 'firmware/c/tests/**'
+      - 'host/**'
       - '.github/workflows/host-tests.yml'
 
 concurrency:
@@ -86,4 +89,18 @@ jobs:
             echo "ERROR: break build PASSED — this test cannot fail (silent pass)"; exit 1
           else
             echo "ok: break build failed as expected"
+          fi
+
+      - name: Host CLI parsing/dispatch (host/hackagotchi_ctl.py)
+        run: |
+          set -euo pipefail
+          echo "== syntax =="
+          python3 -m py_compile host/hackagotchi_ctl.py host/tests/ctl_selftest.py
+          echo "== real run: must PASS =="
+          python3 host/tests/ctl_selftest.py
+          echo "== verify-the-verifier: break run must FAIL =="
+          if HG_CTL_SELFTEST_BREAK=1 python3 host/tests/ctl_selftest.py; then
+            echo "ERROR: break run PASSED — this test cannot fail (silent pass)"; exit 1
+          else
+            echo "ok: break run failed as expected"
           fi
