@@ -209,6 +209,26 @@ When you can't physically touch the hardware (operator away, no BOOTSEL/replug p
   core-affinity isolation the plan assumed does not exist (F1-1). Coexistence became pure
   priority/preemption on one core — which makes the contention test (§3) *more* load-bearing, not less.
   Re-verify the assumption against the actual base.
+- **0 stalls ≠ no regression — the shared XIP cache is priority-blind (learned v1.1, 2026-06-22).** On a
+  flash-XIP image the DAP/USB response-framing path is flash-resident; a heavy *lowest-priority* task
+  (the OLED render loop) churns the 16 KB XIP cache and evicts that path, so the next transaction pays a
+  QSPI refill inside the USB-IN response window → **retryable** CMSIS-DAP framing desyncs. They are
+  **0-stall** (the RAM-resident USB ISR keeps acking — latency, not a hang), so the R1 hard bar still
+  passes while the *retryable rate* silently regresses (v1.1 ~1.4–3.0% vs shipped v1.0 ~0.2%). Priority
+  does not protect you — it schedules CPU, not the shared cache/QSPI bus. Lessons: (1) **gate the
+  retryable rate against the shipped baseline, not just stalls**; (2) the fix is to pin the hot path into
+  SRAM (linker `EXCLUDE_FILE` of the DAP/USB objects, residency-only — no priority change), which took
+  the rate to **0/500**.
+- **Distinguish a real regression from bench drift with an interleaved A/B against the SHIPPED image.**
+  When a candidate's retryable rate looks high you cannot tell "firmware regression" from "noisy host /
+  target-QSPI fragility" by one number. Soak the *gold shipped* image and the candidate on the SAME
+  bench/host/cable back-to-back, **candidate last in time** (kills the time/order confound), power-cycling
+  before each. Here it was decisive: power-cycling the target made the v1.1 rate *worse*, not better —
+  falsifying the dirty-bench hypothesis — while the shipped image ran clean on the identical bench, so the
+  only variable left was the firmware. Download the released `.uf2` and **sha-match it** so the baseline is
+  the exact shipped artifact, not a maybe-different rebuild. A counter like the firmware's own `dap_xfers`
+  (transfers executed) read before/after the soak cross-checks that the probe was live throughout — a
+  soak whose transfer counter never moved is a silent pass.
 - **A counter latched at boot proves nothing.** "The soak ran 1000 times" doesn't prove the OLED task
   kept looping — NAKs are swallowed, an `ok` flag set once stays set. Capture a *monotonic* counter from
   the device (loopback → CDC, or the firmware's own status reply) to prove liveness; eyeball is rank 5.

@@ -47,6 +47,26 @@ must not busy-wait or do slow I/O, or it delays the probe:
   wedge (so do **not** watchdog the dashboard task; watchdog TUD instead — it is never legitimately
   starved because DAP is below it).
 
+**The XIP cache is priority-blind (Finding, v1.1).** Priority arbitrates CPU *scheduling*, not the
+shared **16 KB XIP instruction cache or the QSPI flash bus**. The image runs from flash XIP and the
+entire CMSIS-DAP response-framing path (`DAP_ProcessCommand`, `SWD_Transfer`, `tud_task_ext`,
+`usbd_edpt_xfer`, the vendor/CDC endpoint glue) is flash-resident — only the USB device ISR
+(`dcd_rp2040_irq`) is in SRAM. A *non-blocking* +0 task that churns a large flash-instruction working
+set every frame (v1.1's OLED render loop: new blit engine + sprites + ghost compositing, 8 blits/frame)
+**evicts the DAP path's cache lines**; the next transaction pays a QSPI refill that lands inside the
+USB-IN response window → **retryable** DAP framing desyncs (wrong command-ID / short-transfer /
+IN-timeout). It stays **0-stall** (the RAM-resident ISR keeps acking the bus — added *latency*, not a
+lock), so it PASSES the R1 hard bar yet **regresses the strict Gate-1 retryable rate the shipped image
+met**. Preemption can't save it: when the DAP task runs, the cache is *already* polluted. Proven by
+interleaved A/B on the bench (v1.1 ~1.4–3.0% retryable vs v1.0 ~0.2%, 0 stalls throughout, candidate
+last-in-time → not bench drift). **Mitigation: `HG_PIN_DAP`** — a gated linker variant
+(`memmap_hackagotchi_pin.ld`) drops the DAP/USB transaction objects from flash `.text` via
+`EXCLUDE_FILE` so they run from SRAM, out of the contended cache (no upstream edit, **residency-only —
+no priority change**, ~19 KB of the +139 KB free SRAM). The pinned image soaked **0/500**. Corollary:
+when you add continuous flash-resident work, **watch the DAP *retryable* rate, not just stalls**, and
+A/B it against the shipped image — and the old "the DAP hot path stays warm in XIP without
+`__not_in_flash_func`" assumption holds only for a light UI; a heavy render loop crosses the threshold.
+
 ## 3. Bounded buffers, counted overflow — never silent loss
 
 Every queue/ring/buffer has a fixed cap and a **counter** for what it had to drop, surfaced in the
