@@ -17,10 +17,14 @@ import sys, os, time, json, subprocess, glob, re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SOAK = os.path.join(HERE, "..", "gates", "gate1_soak.sh")
-CTRL = "/dev/cu.usbmodem21204"   # JSON control
+sys.path.insert(0, os.path.join(HERE, ".."))
+from hil_ports import find_ctrl
+CTRL = find_ctrl()               # JSON control — detected by behaviour (replug-proof)
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 300
 
 import serial
+if not CTRL:
+    print("coexist_soak: no Hackagotchi control port found (is the probe connected?)"); sys.exit(2)
 
 
 def ctrl(query, wait=1.5):

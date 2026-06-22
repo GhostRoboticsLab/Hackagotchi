@@ -7,10 +7,12 @@ Camera-free + the SD-EXPLORER screen via self-attestation.
 
   ./sd_hil.py        # bar: all checks OK + "M4.4 SD EXPLORER: PASS"
 """
-import sys, time, json, re
+import os, sys, time, json, re
 import serial
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from hil_ports import find_ctrl
 
-CTRL = "/dev/cu.usbmodem21204"
+CTRL = find_ctrl()               # CDC1 control — detected by behaviour (replug-proof)
 
 
 def ctrl(s, query, wait=1.0):
@@ -33,6 +35,8 @@ def main():
         nonlocal ok
         print(("  OK  " if cnd else "  FAIL") + " " + m); ok = ok and cnd
 
+    if not CTRL:
+        print("no Hackagotchi control port found (is the probe connected?)"); return 2
     print("== M4.4 SD explorer HIL ==")
     c = serial.Serial(CTRL, 115200, timeout=0.4); c.dtr = True; time.sleep(0.15)
 

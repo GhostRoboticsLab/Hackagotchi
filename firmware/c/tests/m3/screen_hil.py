@@ -14,12 +14,16 @@ OLED gives shows<loops and FAILS this test — the counter is a genuine dark-pan
 operator glance covers only GRAPHICS correctness (the cat + sparkline are drawn but not text-attestable);
 the panel-lit + text-content layers are machine-proven here.
 """
-import sys, time, json, re
-CTRL = "/dev/cu.usbmodem21204"
+import os, sys, time, json, re
 import serial
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from hil_ports import find_ctrl
 
 
 def main():
+    CTRL = find_ctrl()
+    if not CTRL:
+        print("no Hackagotchi control port found"); return 2
     s = serial.Serial(CTRL, 115200, timeout=0.3)
     s.dtr = True; time.sleep(0.2); s.reset_input_buffer()
 
@@ -95,13 +99,17 @@ def main():
         chk("g:" in txt, f"screen {n}: ghost vitals attest (g:<state> token present)")  # M-UI-3
         chk(txt.count("\n") + 1 <= DASH_MAX_LINES + 1, f"screen {n}: attestation within cap (no silent drop)")
 
-    # M-UI-5: companion verbs. summon/banish force the ghost vitals deterministically (no real wedge
-    # needed), so the override is HIL-provable; pet / theme / ghost-mute are acknowledged.
+    # M-UI-5: companion verbs. banish/summon override the ghost PRESENCE deterministically (HIL-provable
+    # with no target): banish -> hidden (g:off), summon -> present. Per ghost_state(), a summoned ghost
+    # still shows its REAL sub-state (live/pale/glitch) — e.g. g:pale when the recorder is wedged (no
+    # target wired) — so assert "present" (not g:off), NOT a specific sub-state. (A specific sub-state
+    # would only hold with a live target wired, which is a latent silent-pass.) pet/theme/mute are acked.
     ctrl('{"q":"screen","n":0}'); time.sleep(0.3)
     ctrl('{"q":"banish"}'); time.sleep(0.4)
     chk("g:off" in ctrl('{"q":"screen"}').get("text", ""), "banish -> g:off (ghost hidden)")
     ctrl('{"q":"summon"}'); time.sleep(0.4)
-    chk("g:live" in ctrl('{"q":"screen"}').get("text", ""), "summon -> g:live (forced present)")
+    sm = ctrl('{"q":"screen"}').get("text", "")
+    chk("g:" in sm and "g:off" not in sm, "summon -> ghost present (real sub-state, e.g. g:pale when wedged)")
     ctrl('{"q":"ghost"}'); time.sleep(0.3)   # clear override -> AUTO
     chk(ctrl('{"q":"pet"}').get("pet") == 1, "pet acknowledged")
     chk(ctrl('{"q":"theme","n":0}').get("theme") == 0, "theme calm set")

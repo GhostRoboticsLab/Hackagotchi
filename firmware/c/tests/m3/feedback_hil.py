@@ -17,15 +17,15 @@ is proven in M3.0); a no-op feedback layer now FAILS here instead of passing.
 CDC0 must be opened FIRST + settle (its line-coding re-inits uart0 / re-arms the RX IRQ) BEFORE uloop_on,
 and connections held persistently (churning a CDC port wedges the macOS USB-CDC driver).
 """
-import sys, time, json, glob
+import os, sys, time, json
 import serial
-
-D = "/dev/cu.usbmodem21202"   # CDC0 UART bridge (inject here)
-C = "/dev/cu.usbmodem21204"   # CDC1 control
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from hil_ports import find_ports
 
 
 def main():
-    if not glob.glob(D) or not glob.glob(C):
+    D, C = find_ports()
+    if not D or not C:
         print("missing CDC0/CDC1"); return 2
     ok = True
     def chk(c, m):

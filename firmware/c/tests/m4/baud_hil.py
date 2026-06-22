@@ -7,11 +7,12 @@ change never touches the DAP path; the cumulative R1 soak at the M4 closeout con
 
   ./baud_hil.py        # bar: all checks OK + "M4.3 BAUD SELECT: PASS"
 """
-import sys, time, json
+import os, sys, time, json
 import serial
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from hil_ports import find_ports
 
-UART = "/dev/cu.usbmodem21202"
-CTRL = "/dev/cu.usbmodem21204"
+UART, CTRL = find_ports()        # CDC0 bridge, CDC1 control — detected by behaviour (replug-proof)
 OPTS = [9600, 19200, 38400, 57600, 115200]
 
 
@@ -40,6 +41,8 @@ def main():
         nonlocal ok
         print(("  OK  " if cnd else "  FAIL") + " " + m); ok = ok and cnd
 
+    if not CTRL or not UART:
+        print("missing CDC0/CDC1 (is the probe connected?)"); return 2
     print("== M4.3 baud selector HIL ==")
     c = serial.Serial(CTRL, 115200, timeout=0.4); c.dtr = True; time.sleep(0.15)
     u = serial.Serial(UART, 115200, timeout=0.4); u.dtr = True; time.sleep(0.6)  # re-inits uart0

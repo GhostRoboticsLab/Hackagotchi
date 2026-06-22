@@ -10,11 +10,12 @@ assert on CDC1. Persistent connections (churning a CDC port wedges macOS USB-CDC
 
   ./hex_hil.py        # bar: all checks OK + "M4.1 HEX SNIFFER: PASS"
 """
-import sys, time, json
+import os, sys, time, json
 import serial
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from hil_ports import find_ports
 
-UART = "/dev/cu.usbmodem21202"   # CDC0 UART bridge
-CTRL = "/dev/cu.usbmodem21204"   # CDC1 JSON control
+UART, CTRL = find_ports()        # CDC0 bridge, CDC1 control — detected by behaviour (replug-proof)
 MARK = "HEXMODE42"               # 9 printable bytes -> hex 48 45 58 4D 4F 44 45 34 32 ('HEX' = 48 45 58)
 
 
@@ -38,6 +39,8 @@ def main():
         nonlocal ok
         print(("  OK  " if c else "  FAIL") + " " + m); ok = ok and c
 
+    if not CTRL or not UART:
+        print("missing CDC0/CDC1 (is the probe connected?)"); return 2
     print("== M4.1 hex sniffer HIL ==")
     c = serial.Serial(CTRL, 115200, timeout=0.4); c.dtr = True; time.sleep(0.15)
     u = serial.Serial(UART, 115200, timeout=0.4); u.dtr = True; time.sleep(0.6)  # re-inits uart0

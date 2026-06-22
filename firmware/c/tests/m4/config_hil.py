@@ -8,10 +8,12 @@ Reboots the device, so each query opens a fresh CDC1 connection (rtc_hil pattern
 
   ./config_hil.py        # bar: all checks OK + "M4.5 PERSISTENCE: PASS"
 """
-import sys, time, json, glob
+import os, sys, time, json, glob
 import serial
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from hil_ports import find_ctrl
 
-CTRL = "/dev/cu.usbmodem21204"
+CTRL = find_ctrl()               # CDC1 control — detected by behaviour (replug-proof)
 
 
 def q(query, wait=1.2):
@@ -30,6 +32,7 @@ def q(query, wait=1.2):
 
 
 def reboot():
+    global CTRL
     try:
         q('{"q":"crash"}', wait=0.4)
     except Exception:
@@ -37,7 +40,9 @@ def reboot():
     time.sleep(2.0)
     t0 = time.time()
     while time.time() - t0 < 30:
-        if glob.glob(CTRL):
+        c = find_ctrl()          # re-detect: the usbmodem suffix can change across a reboot
+        if c:
+            CTRL = c
             if q('{"q":"status"}'):
                 return True
         time.sleep(0.5)
@@ -50,6 +55,8 @@ def main():
         nonlocal ok
         print(("  OK  " if cnd else "  FAIL") + " " + m); ok = ok and cnd
 
+    if not CTRL:
+        print("no Hackagotchi control port found (is the probe connected?)"); return 2
     print("== M4.5 settings persistence HIL ==")
     print("set baud 9600:", q('{"q":"baud","v":9600}'))
     print("setmacro 0 M4TEST:", q('{"q":"setmacro","i":0,"s":"M4TEST"}'))
