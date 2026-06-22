@@ -157,15 +157,22 @@ Working backlog. The plan of record is `docs/engineering-plan.md`; this is the l
 Prioritised from a survey→propose→rank pass over the current tree (value / effort / R1-risk / fit). Item
 **#1 (host-tests CI) is DONE** — see Housekeeping above. The rest, best-first:
 
-- [ ] **(2) DAP transfer/health telemetry in `{"q":"status"}`** — value HIGH / effort S / risk MED *(touches the DAP path → re-gate before shipping)*.
-  A monotonic `dap_xfers` + a coarse last-active stamp, incremented with a single non-blocking `++` at the
-  DAP service site in our overlay `main.c` (lower-risk alternative: the `tud_hid_set_report_cb` we already
-  shadow, which sits at TUD prio *above* DAP), published via the existing seqlock/snapshot and surfaced in
-  `write_status()` + the host CLI. Gives the headline "0 stalls" invariant a firmware-side witness so every
-  soak is self-cross-checkable (xfers advanced by the expected count). **Must re-gate** before merge: Gate 1
-  + `coexist_soak.py 300`, 0 stalls *and* unchanged retryable rate. Follow-up (nobody proposed it): a
-  companion `dap_retries` counter + a soak that ASSERTS the retryable rate stays under the documented ceiling
-  — turns the central carried caveat into a guarded bound instead of an ad-hoc per-soak observation.
+- [~] **(2) DAP transfer/health telemetry in `{"q":"status"}`** — value HIGH / effort S / risk MED *(touches the DAP path → re-gate before shipping)*.
+  A monotonic `dap_xfers` + a coarse last-active stamp, giving the headline "0 stalls" invariant a
+  firmware-side witness so every soak is self-cross-checkable (xfers advanced by the expected count).
+  - [x] **Implemented on branch `feat/dap-health-telemetry`** *(2026-06-22, commit 5183048)*, **desk-verified
+    only**. NOTE — the TODO's "++ in our overlay `main.c`" premise was wrong: with `THREADED=1` the active
+    DAP path is upstream `tusb_edpt_handler.c::dap_thread` calling `DAP_ExecuteCommand`, not the dead
+    `while(!THREADED)` loop. Wired instead via `-Wl,--wrap=DAP_ExecuteCommand` → `__wrap_DAP_ExecuteCommand`
+    in a new owned `src/dap_health.{c,h}` (counters single-writer/lock-free; non-blocking `++` + `time_us_32`).
+    This keeps the upstream re-diff surface at **zero** (no `tusb_edpt_handler.c` shadow → clean for the #8
+    v2.3.1 spike). Surfaced in `write_status()` (`dap_xfers`/`dap_idle_ms`; buffer 256→320) + host CLI.
+    Builds clean, `analyze.sh` PASS (`dap_health.c`+`cdc1_control.c` 0/0), disasm confirms `dap_thread→__wrap→real`.
+  - [ ] **GATE before merge to main (needs the bench):** `gate1_soak.sh 1000` (0 fails + 0 stalls) +
+    `coexist_soak.py 300` (0 stalls AND unchanged retryable rate), cross-checking that `dap_xfers` advanced
+    by ~the soak's transfer count. Runs AT DAP priority — do not merge until green.
+  - [ ] Follow-up (nobody proposed it): a companion `dap_retries` counter + a soak that ASSERTS the retryable
+    rate stays under the documented ceiling — turns the central carried caveat into a guarded bound.
 - [ ] **(3) BOM + narrative build/flash guide** — value HIGH / effort M / risk low *(pure docs)*.
   `docs/build-a-hackagotchi.md`: a real Bill of Materials (XIAO RP2040, expansion board, SSD1306 OLED,
   microSD, passive buzzer, WS2812, SWD/UART jumpers, filament — with qty/links/approx cost), a step-by-step
