@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use or reference Hackagotchi, please cite it using this metadata."
+title: "Hackagotchi"
+abstract: >-
+  A supercharged, pocket debugger for microcontrollers: firmware for a Seeed
+  XIAO RP2040 that runs a CMSIS-DAP SWD debug probe, a UART-to-microSD black-box
+  recorder, and a reactive OLED companion from one image on a single-core MCU.
+type: software
+authors:
+  - family-names: Balakrishna
+    given-names: Pratheek
+repository-code: "https://github.com/GhostRoboticsLab/Hackagotchi"
+url: "https://github.com/GhostRoboticsLab/Hackagotchi"
+license: GPL-3.0-or-later
+keywords:
+  - debug-probe
+  - cmsis-dap
+  - rp2040
+  - swd
+  - firmware
+  - freertos
