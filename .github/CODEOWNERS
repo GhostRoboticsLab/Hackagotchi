@@ -1,0 +1,15 @@
+# Code owners — drives review routing and binds the repo ruleset's
+# "require code owner review" rule (which is a no-op without this file).
+#
+# See: https://docs.github.com/articles/about-code-owners
+
+# Default owner for everything
+*                                           @prat96
+
+# The two files the analyze.sh gate requires to stay pristine
+# (any warning in either fails CI) — keep eyes on them explicitly.
+/firmware/c/src/hackagotchi_dashboard.c     @prat96
+/firmware/c/src/cdc1_control.c              @prat96
+
+# CI / repo configuration
+/.github/                                   @prat96
