@@ -1,0 +1,70 @@
+name: 🐞 Bug report
+description: Something on the probe, dashboard, recorder, or host CLI misbehaves
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a report. The fastest path to a fix is the **device's own status line** —
+        connect to the CDC1 control port and paste the output of `{"q":"status"}` below.
+        (Identify the control port by behavior: it's the one that answers with `"fw":"Hackagotchi"`.)
+
+  - type: textarea
+    id: status
+    attributes:
+      label: '`{"q":"status"}` output'
+      description: 'Paste the full JSON line returned by the CDC1 control port. The `"ver"` field tells us the exact firmware build.'
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: lastfault
+    attributes:
+      label: '`{"q":"lastfault"}` crash dump (if any)'
+      description: 'If the probe faulted/reset, paste the crash-box dump from `{"q":"lastfault"}`. Leave blank if not applicable.'
+      render: text
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Best guess — optional.
+      options:
+        - "Not sure"
+        - "DAP / SWD probe (CDC0 + debug)"
+        - "OLED dashboard"
+        - "UART black-box recorder / microSD"
+        - "CDC1 JSON control channel"
+        - "Host CLI (hackagotchi_ctl.py)"
+        - "Build / toolchain"
+    validations:
+      required: false
+
+  - type: input
+    id: host-os
+    attributes:
+      label: Host OS
+      placeholder: "e.g. macOS 15.5, Ubuntu 24.04, Windows 11"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I'm on the latest release (or `main`) and the issue still reproduces.
+          required: false
+        - label: I searched existing issues and didn't find a duplicate.
+          required: false
