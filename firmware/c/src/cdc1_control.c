@@ -38,6 +38,7 @@
 #include "feedback.h"               // M3.0: LED/buzzer HW-reconciliation test commands
 #include "hg_config.h"              // M4.2: macro list ({"q":"macros"} / {"q":"macro"})
 #include "dap_health.h"             // DAP transfer/health witness ({"q":"status"} dap_xfers/dap_idle_ms)
+#include "hg_input.h"               // v1.2: button/joystick readback ({"q":"btn"} / {"q":"joy"})
 
 // Build-discriminating tags compiled into the status reply so the RUNNING firmware proves its OWN
 // identity (closes the Gate-1 provenance gap). Mirror the CMake -D flags (PRIVATE on the target).
@@ -86,7 +87,8 @@ static void write_status(uint8_t itf) {
                      "\"stall_cfg\":%d,\"stall_us\":%u,\"prio\":%d,"
                      "\"dap_xfers\":%u,\"dap_idle_ms\":%u,"
                      "\"crashes\":%u,\"wd_armed\":%d,\"wd_gap\":%u,\"tud\":%u,\"page\":%d,"
-                     "\"urx_drop\":%u,\"urx_hw\":%u,\"utx_drop\":%u,\"frag\":%u}\n",
+                     "\"urx_drop\":%u,\"urx_hw\":%u,\"utx_drop\":%u,\"frag\":%u,"
+                     "\"px\":%u,\"btn\":%d,\"joy\":%d}\n",
                      HG_VERSION,
                      (unsigned) xPortGetFreeHeapSize(),
                      (unsigned) (time_us_64() / 1000000ull),
@@ -96,7 +98,8 @@ static void write_status(uint8_t itf) {
                      (unsigned) crash_box_count(), (int) wd_is_armed(), (unsigned) wd_max_gap_ms(),
                      (unsigned) g_tud_checkin, (int) g_dash_screen,
                      (unsigned) uart_bridge_drops(), (unsigned) uart_bridge_highwater(),
-                     (unsigned) cdc_uart_tx_overflow(), (unsigned) s_partial);
+                     (unsigned) cdc_uart_tx_overflow(), (unsigned) s_partial,
+                     (unsigned) feedback_pixel_count(), hg_button_down(), hg_joy_ok());
   if (len > 0) reply(itf, r);
 }
 
@@ -310,6 +313,35 @@ static void handle_line(uint8_t itf, const char *line, int len) {
     feedback_pixel(CLAMP8(rr), CLAMP8(gg), CLAMP8(bb));
     #undef CLAMP8
     char r[48]; snprintf(r, sizeof r, "{\"pixel\":[%d,%d,%d]}\n", rr, gg, bb); reply(itf, r); return;
+  }
+  // v1.2 "Companion": drive the WHOLE WS2812 chain to one colour. {"q":"fill","r":..,"g":..,"b":..}
+  if (!strcmp(q, "fill")) {
+    int rr = 0, gg = 0, bb = 0;
+    get_int(line, tok, n, "r", &rr); get_int(line, tok, n, "g", &gg); get_int(line, tok, n, "b", &bb);
+    #define CLAMP8(v) ((uint8_t)((v) < 0 ? 0 : (v) > 255 ? 255 : (v)))
+    feedback_fill(CLAMP8(rr), CLAMP8(gg), CLAMP8(bb));
+    #undef CLAMP8
+    char r[56]; snprintf(r, sizeof r, "{\"fill\":[%d,%d,%d],\"px\":%d}\n", rr, gg, bb, feedback_pixel_count());
+    reply(itf, r); return;
+  }
+  // v1.2: set an animated MOOD on the chain. {"q":"mood","n":0..6}  (optional "i":0..255 intensity)
+  if (!strcmp(q, "mood")) {
+    int m = 0, inten = 200; get_int(line, tok, n, "n", &m); get_int(line, tok, n, "i", &inten);
+    if (inten < 0) inten = 0;
+    if (inten > 255) inten = 255;
+    feedback_mood(m, (uint8_t)inten);
+    char r[40]; snprintf(r, sizeof r, "{\"mood\":%d,\"i\":%d}\n", m, inten); reply(itf, r); return;
+  }
+  // v1.2 HIL readback: the on-device button (GP16). {"q":"btn"} -> held state + taps since boot.
+  if (!strcmp(q, "btn")) {
+    char r[48]; snprintf(r, sizeof r, "{\"down\":%d,\"presses\":%u}\n", hg_button_down(), (unsigned)hg_button_presses());
+    reply(itf, r); return;
+  }
+  // v1.2 HIL readback: the joystick (ADS1115). {"q":"joy"} -> present? + raw X/Y + decoded direction.
+  if (!strcmp(q, "joy")) {
+    char r[72]; snprintf(r, sizeof r, "{\"ok\":%d,\"x\":%d,\"y\":%d,\"dir\":%d}\n",
+                         hg_joy_ok(), hg_joy_x(), hg_joy_y(), hg_joy_dir());
+    reply(itf, r); return;
   }
   // M3 closeout HIL: feedback-layer readback — proves drive_feedback drove the buzzer/NeoPixel on events.
   if (!strcmp(q, "fb")) {
