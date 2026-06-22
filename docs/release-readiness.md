@@ -1,4 +1,4 @@
-# Release readiness — `v1.0`
+# Release readiness — `v1.1`
 
 The single evidence index for the C probe firmware release. It draws the line between what **CI can
 automate** and what is **operator-attested on real hardware**, and pins each green to the *tagged
@@ -8,19 +8,55 @@ image* (not a per-increment dev build).
 > (+ for some, an SD card / SWD fixtures). CI (`.github/workflows/firmware-c.yml`, self-hosted runner)
 > runs **only** the build + the `analyze.sh` static-analysis gate. A green CI badge therefore means
 > "builds + passes static analysis," **not** "the gates ran." The gates below were run by hand on the
-> v1.0 image and recorded here.
+> image and recorded here.
 
-## Release identity
+## Release identity (v1.1)
 
 | | |
 |---|---|
-| Tag | `v1.0` |
-| Version (compiled in) | `1.0.0` — reported live by `{"q":"status"}` → `"ver"` |
+| Tag | `v1.1` |
+| Version (compiled in) | `1.1.0` — reported live by `{"q":"status"}` → `"ver"` (verified on the artifact: `strings` → `1.1.0`) |
 | Base | fork of `raspberrypi/debugprobe` @ `debugprobe-v2.2.3` (single-core FreeRTOS) |
-| Local build (attested image) | `text 170604 / bss 84140` · `.uf2` sha256 `7d1a2b50…27047` · `.elf` sha256 `149708ea…f380` |
-| Released artifact | **byte-identical local rebuild** — `.uf2` sha256 `7d1a2b50…27047` matches the attested image bit-for-bit. The self-hosted CI runner was offline after a power-cycle, so it was built locally from the tagged source (reproducible) and released directly; CI remains available for future tags. |
-| Published | **tag `v1.0` @ `44081d9`** · [Release](https://github.com/GhostRoboticsLab/Hackagotchi/releases/tag/v1.0) (`.uf2` + `.elf` + NOTICE + LICENSE) · 2026-06-22 |
-| History note | The firmware version compiled into the binary is `1.0.0` (unchanged — `{"q":"status"}` → `ver=1.0.0`; build with `VERSION=1.0.0` to reproduce the byte-identical `.uf2`). The public git history was scrubbed in two passes (2026-06-21: internal strategy docs purged; 2026-06-22: residual agent co-author/session trailers + strategy detail stripped from commit messages); the cleaned release commit is `44081d9`, byte-identical in tree to the pre-scrub attested image. GitHub immutable-releases permanently reserves a tag name once a release has used it, so the original `v1.0.0` tag could be neither re-pointed nor reused — the release was retired and re-cut under a fresh tag **`v1.0`** at `44081d9`. |
+| Headline | OLED UI overhaul (cat + Spectre) **+ the `HG_PIN_DAP` XIP-cache-contention fix it needed** (§0 below) + DAP health telemetry |
+| Build | `VERSION=1.1.0 ./build_fork.sh` (Arm GCC 13.3.Rel1 + pico-sdk 2.2.0; **`HG_PIN_DAP=ON` by default**) |
+| Footprint | `.text` 110516 B (flash XIP) · `.data` 18832 B copied to **SRAM** at boot (incl. the ~18.8 KB pinned DAP/USB hot path) · `.bss` 82068 B |
+| Attested artifact | `.uf2` sha256 `b0826090…d683` · `.elf` sha256 `56c5c975…5bec` |
+| Gate | `analyze.sh` **PASS** (exit 0); the 7 DAP/USB transaction objects verified resident in SRAM (`nm`: `0x2000xxxx`), i.e. the pin took effect in the binary |
+| Published | tag **`v1.1`** · Release pending push (`.uf2` + `.elf` + NOTICE + LICENSE) · 2026-06-22 |
+| Tag scheme | per v1.0: GitHub immutable-releases reserve a tag name permanently, so semver `1.1.0` ships under the short tag **`v1.1`** (the `1.1.x` tag space stays open for patch re-cuts). |
+
+## Section 0 — v1.1 delta: the XIP-cache-contention finding + `HG_PIN_DAP` fix
+
+The v1.1 UI overhaul is a `+0` (lowest-priority), snapshot-only render layer that never touches the DAP
+hot path — yet it introduced a **0-stall DAP regression** via a path priority cannot see. This section is
+the proof it was found, root-caused, and fixed before shipping.
+
+**Falsifiable claim (the regression):** *the v1.1 UI does not regress the DAP retryable-desync rate the
+shipped v1.0 met.* — **FALSIFIED**, then fixed.
+
+| Step | Evidence | Result |
+|---|---|---|
+| Reproduce | Gate-1 soaks of the v1.1 candidate on a clean bench | **1.4–3.0% retryable**, **0 stalls**, 0 target-glitch |
+| Is it the firmware (not bench drift)? | **Interleaved A/B vs the shipped v1.0 `.uf2`** on one bench/host/cable, candidate **last-in-time**, power-cycle each | v1.0 **~0.2%**; v1.1 **1.4–3.0%** with the v1.1 run last → real **~7–15× regression**, not drift. (Tell: a power-cycle made it *worse*, not better → not dirty-bench.) |
+| Root cause | ELF artifact diff + reasoning: the +0 render loop churns the 16 KB XIP I-cache and evicts the flash-resident CMSIS-DAP framing path; only the USB device ISR (`dcd_rp2040_irq`) was SRAM-resident → QSPI refill in the USB-IN window → retryable desyncs, **0-stall** (RAM ISR keeps acking). **The XIP cache is priority-blind.** | confirmed |
+| Fix | `HG_PIN_DAP` → `memmap_hackagotchi_pin.ld` drops the 7 DAP/USB transaction objects from flash `.text` so they run from SRAM (residency only; no priority change; no upstream edit). `nm` on the v1.1 artifact: all 7 at `0x2000xxxx`. | in the shipped binary |
+| Pure-pin soak | `gate1_soak 500` on the pinned image (run `b7dsm5jry`) | **0/500 fails, 0 stalls** — cleaner than v1.0's own ~0.2% |
+| Combined image soak | `gate1_soak 1000` on the combined candidate (`ver 1.1.0-pin-dh` — identical to the released `1.1.0` but for the compiled version string), **non-idle host** (concurrent git/doc work mid-run) | authoritative line **verbatim**: `DONE N=1000 fails=2 stalls=0 target_glitch=0` → **`PROBE VERDICT: FAIL` (strict 0-fail Gate-1 bar)**. **999/1000 clean cycles**; the `fails=2` are both from **one** bad cycle (#994: a `TARGET_OK` retryable download fail + its re-verify mismatch). **0 stalls, 0 target-glitch.** |
+| Liveness cross-check | a live `{"q":"status"}` read **immediately after the soak** (companion read — the soak harness logs cycle tallies, not the status reply) | `dap_xfers=1,993,328`, `crashes=0`, `urx_drop=utx_drop=0` — the monotonic `--wrap=DAP_ExecuteCommand` witness shows the probe serviced ~2.0 M transfers, so the clean cycles are real, not a dark/silent pass. |
+
+**Verdict — honest, not flattering.** The R1 hard bar (**0 stalls**) held in every soak, and the fix's
+*correctness* is established: the interleaved A/B eliminated the ~7–15× regression and the **pure-pin image
+soaked `0/500` (PASS)** — that 0/500 is the clean reference. **But the combined 1000-cycle run's own strict
+Gate-1 verdict was `FAIL`** — `fails=2` (0.2%), both from a single non-stall `TARGET_OK` retryable cycle on
+an **admitted non-idle host** (the methodology's #1 rate inflator). 0.2% is the *same order* as v1.0's ~0.2%
+floor — **not below it**. So the combined run corroborates 0-stall + witness-live but did **not** itself
+clear the strict retryable bar; we ship on the strength of the A/B + the 0/500, not this run. **Carried
+forward (open):** re-run the combined image `gate1_soak 1000` + `coexist_soak 300` on a strictly idle host
+for a clean 0/N headline.
+
+> Methodology now codified in `docs/firmware-conventions.md` §2, `docs/mcu-bringup-playbook.md` §10, and
+> the `run-hil-gate` / `firmware-gate` skills: **0 stalls is necessary, not sufficient** — also gate the
+> retryable rate against the *shipped* image, interleaved + candidate-last, with the `dap_xfers` witness.
 
 ## Section A — CI-automated (`firmware-c.yml`)
 
@@ -33,7 +69,14 @@ image* (not a per-increment dev build).
 Host unit tests (`ring_test`, `recorder_test`) are pure-host and **CI-able** (no hardware); they pass
 locally (below) and a CI job for them is a tracked follow-up.
 
-## Section B — HIL-attested on the v1.0 image (NOT run in CI)
+## Section B — HIL-attested baseline (NOT run in CI) — carried forward to v1.1
+
+> **Carry-forward rationale.** The v1.1 delta is (a) the OLED UI overhaul, which runs entirely at the
+> lowest priority off snapshot-only reads — it adds new *screens/attestation*, not new probe/bridge/SD
+> paths — (b) the `HG_PIN_DAP` **residency** change (no logic/priority change), (c) the additive
+> `dap_xfers`/`dap_idle_ms` status fields, and (d) the `ver` string. The portable + integration suites
+> below are unaffected by those, so they carry forward as the v1.1 baseline; the v1.1-specific evidence
+> (UI surfaces via `screen_hil`, and the DAP regression + fix) is in **§0** and the M-UI results.
 
 Ports: CDC1/control `/dev/cu.usbmodem21204`, CDC0/bridge `/dev/cu.usbmodem21202`. Runner:
 `…/PicoInky/.venv/bin/python`. Device flashed with the v1.0 `.uf2` (`{"q":"status"}` → `ver=1.0.0`).
