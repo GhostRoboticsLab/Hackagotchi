@@ -1,0 +1,29 @@
+# Dependabot version updates.
+#
+# Scope is deliberately narrow. The only manifest-managed dependencies in this
+# repo are the GitHub Actions used by CI and the host-side Python tooling.
+# The C firmware's upstream (debugprobe + FatFs + pico-sdk) is git-pinned by
+# setup.sh into a gitignored upstream/ tree — that is intentional and is NOT a
+# Dependabot ecosystem; do not add one for it.
+#
+# Dependabot SECURITY updates are enabled separately in repo settings; this file
+# only adds scheduled VERSION-update PRs.
+version: 2
+updates:
+  # CI actions (actions/checkout, upload-artifact, … pinned as floating tags today)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+
+  # Host tooling + HIL test suites (requirements.txt: pyserial, Pillow)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore"
+    # pyserial==3.5 is exact-pinned for USB-CDC transport stability on the bench;
+    # review any bump against the macOS HIL gotchas before merging.
