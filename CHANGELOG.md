@@ -6,9 +6,9 @@ firmware's own semver is compiled into the binary and reported by `{"q":"status"
 
 ## [1.1] - 2026-06-22
 
-_Candidate: the firmware on this commit builds + passes the static-analysis gate; on-hardware
-re-attestation and the GitHub release are pending (see [`docs/release-readiness.md`](docs/release-readiness.md)).
-Drop this line when v1.1 is published._
+The **OLED UI overhaul** — a cat + Spectre the ghost give the probe a face — shipped together with the
+**`HG_PIN_DAP` reliability fix** that the overhaul turned out to need, plus DAP health telemetry. Still
+**R1-clean: 0 DAP transfer stalls.**
 
 ### OLED UI overhaul — the cat + Spectre the GhostLabs ghost (M-UI-1..5)
 A full dashboard glow-up where **every flicker of personality is a literal readout of a real
@@ -33,6 +33,33 @@ camera-free text-attestation model.
 
 Footprint: text +3.3 KB, bss +164 B total. Static-analysis gate green; the blit host unit test and an
 extended `screen_hil.py` attest the new surfaces.
+
+### DAP reliability — XIP-cache-contention fix (`HG_PIN_DAP`, ON by default)
+The heavier render loop above exposed a subtle, **0-stall** regression and we fixed it before shipping:
+
+- **The finding.** The firmware runs from flash XIP through a 16 KB instruction cache. The v1.1 render
+  loop (blit engine + ghost compositing, ~8 blits/frame) churns a large enough flash-instruction working
+  set to **evict the flash-resident CMSIS-DAP framing path** from that cache; the next transaction pays a
+  QSPI refill inside the USB-IN response window → **retryable** DAP framing desyncs (wrong command-ID /
+  short-transfer / IN-timeout). It stays **0-stall** (the RAM-resident USB ISR keeps acking the bus — added
+  *latency*, not a lock), so it passed the R1 hard bar yet regressed the strict Gate-1 *retryable* rate the
+  shipped v1.0 met (**~1.4–3.0% vs v1.0's ~0.2%**). Priority can't save it — when the DAP task runs, the
+  cache is already polluted. Proven by an **interleaved A/B against the shipped v1.0 image** on one bench
+  (candidate last-in-time → not bench drift). The *light* v1.0 UI never crossed this threshold; the v1.1 UI does.
+- **The fix — `HG_PIN_DAP`.** A gated custom linker script (`memmap_hackagotchi_pin.ld`) drops the 7
+  DAP/USB transaction objects from flash `.text` (via `EXCLUDE_FILE`) so they run from **SRAM**, out of the
+  contended cache. **Residency change only — no FreeRTOS priority change, no upstream edit** — costing
+  ~18.8 KB of the +139 KB XIP SRAM win. The pinned image soaks **0/500** (Gate 1 PASS, cleaner than v1.0's
+  own ~0.2%) — the clean reference. (A longer 1000-cycle run of the pin+telemetry image on a *non-idle*
+  host stayed **0-stall** but logged 2 retryable desyncs on one cycle — a strict-bar `FAIL` at ~0.2%, the
+  v1.0-class floor; an idle-host re-run for a clean 0/N is the one open item — see `release-readiness.md` §0.)
+  **ON by default from v1.1**; build `HG_PIN_DAP=OFF` to reproduce the pre-fix image for an A/B soak.
+- **DAP health telemetry.** `{"q":"status"}` now reports `dap_xfers` (monotonic CMSIS-DAP commands
+  executed, via a `--wrap=DAP_ExecuteCommand` witness) and `dap_idle_ms` — a machine-checkable liveness
+  cross-check so a "clean" soak can't silently pass with a dead probe. The witness object is itself pinned.
+
+See [`docs/firmware-conventions.md`](docs/firmware-conventions.md) §2 ("the XIP cache is priority-blind"),
+[`docs/mcu-bringup-playbook.md`](docs/mcu-bringup-playbook.md) §10, and `docs/release-readiness.md`.
 
 ## [1.0] - 2026-06-21
 

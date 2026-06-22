@@ -17,8 +17,14 @@ These are *established by HIL evidence* in this repo (see `tests/{gates,m1,m2,m3
   "Core 1" to give the UI.** Coexistence is by **priority/preemption**, proven across 5000+ flash cycles.
 - **XIP, no flash-pinning.** We dropped `copy_to_ram` → run from flash XIP (**+139 KB SRAM**, free 35→174 KB).
   The soak proved the DAP hot path stays warm in the 16 KB XIP cache **without** `__not_in_flash_func`
-  pinning (SWCLK is PIO-generated; the SWD servicing code is tiny). Pinning code into RAM would spend back
-  the RAM win for no measured benefit.
+  pinning *for the light M3 UI* (SWCLK is PIO-generated; the SWD servicing code is tiny).
+  **[Corrected after v1.1 HIL]** This held only up to a *light* UI. The shipped v1.1 render loop (sprite
+  blit engine + ghost compositing, ~8 blits/frame) churns a large enough flash-instruction working set to
+  **evict** the DAP framing path from the shared XIP cache, adding a QSPI refill inside the USB-IN window
+  → a measurable, **still-0-stall** retryable-desync regression (~1.4–3.0% vs v1.0's ~0.2%, proven by
+  interleaved A/B on the bench). The fix is *not* to pin the whole image back to RAM, but to pin only the
+  DAP/USB hot path (~19 KB of the +139 KB win) via **`HG_PIN_DAP`**, keeping XIP-default for everything
+  else; the pinned image soaks **0/500**. See `docs/firmware-conventions.md` §2 + `mcu-bringup-playbook.md` §10.
 - **No user button.** GP27 (the only expansion button) became **SWDIO** at Gate 1; GP26 → SWCLK. Input is
   **auto-cycle + CDC1** (`next`/`prev`/`{"q":"screen","n":N}`). External buttons/switches are a future
   soldering option (broken-out Dx pads only — GP16/17 aren't pads).
@@ -44,14 +50,14 @@ These are *established by HIL evidence* in this repo (see `tests/{gates,m1,m2,m3
 | --- | --- | --- |
 | **Dual-core split**: Core 0 diagnostic, Core 1 UI; communicate via `multicore_fifo` | **REJECT** | Single-core FreeRTOS (F1-1). There is no spare core without enabling the #189-regressed SMP path we avoided, or bare-metal core1 fighting FreeRTOS. Our priority model already gives the UI "free" time. |
 | **"No shared volatile flags; use multicore FIFO"** | **REJECT** | Moot (single core) and counter to our *proven* single-writer-snapshot idiom. Keep snapshots/SPSC. |
-| **`__not_in_flash_func()` the UI loop + ISRs to protect the XIP cache** | **REJECT** | We empirically disproved the cache-thrash fear; pinning re-spends the XIP RAM win. The UI is lowest-prio + preempted, so its cache footprint can't threaten DAP timing. |
+| **`__not_in_flash_func()` the UI loop + ISRs to protect the XIP cache** | **REJECT (the *prescription*) — but the *fear* was real** | **[Corrected after v1.1 HIL]** Pinning the *UI loop* is the wrong fix — the UI is the cache aggressor; you can't protect the cache by moving the aggressor into it, and the UI is lowest-prio + preempted anyway. But "cache footprint can't threaten DAP timing" was **wrong**: the heavy v1.1 render loop *does* evict the flash-resident DAP path (priority schedules CPU, not the XIP cache). The right fix pins the **victim** — the DAP/USB hot path (~19 KB) — to SRAM via `HG_PIN_DAP`, not the aggressor. |
 | **Framebuffer in an isolated SRAM bank (`.sram4`)** | **DEFER / measure-first** | A real RP2040 technique for DMA-vs-USB AHB contention, but M2 already showed the OLED coexists at ~1% retryable. Only worth it *if* a DMA flush (below) shows measurable contention. Don't pre-optimize. |
 | **DMA-push the 1025-byte framebuffer to I2C, CPU-free** | **ADOPT** | Genuine win: frees the CPU during the flush and (with FM+) shrinks the bus-hold. Our ssd1306 lib **already** uses the 1025-byte / `[0]=0x40` layout, so only the transfer path changes. Must still hold the i2c1 mutex for the DMA's duration (RTC shares the bus). |
 | **`frame_dirty` — only flush on change** | **ADOPT** | We currently redraw every 250 ms. A dirty-flag cuts i2c1 traffic hugely (most frames are identical), freeing the bus for the RTC and lowering coexistence pressure. High value, low risk. |
 | **I2C1 @ 1000 kHz (Fast Mode Plus)** | **ADAPT — with care** | FM+ shrinks the flush ~23 ms→~9 ms (good for R1). **But the PCF8563 RTC shares this bus and is typically rated 400 kHz.** Options: (a) verify the specific RTC tolerates FM+; (b) keep 400 kHz; (c) clock-switch around RTC transactions. Do **not** blindly set 1 MHz — it risks the clock. |
 | **Reactive state machine (IDLE / UART_RX / ERROR), cat animation scales with packet rate** | **ADOPT** | Already feasible from the snapshot (`rx_total` delta, `wedge`, `alert`). This is the heart of the "alive" feel. Map states to snapshot fields, not FIFO messages. |
 | **`STATE_OSC` / `STATE_PWM` (cat interacting with waveforms/wheels)** | **REJECT** | Those screens are hard-dropped (pin conflicts). No scope/PWM to react to. |
-| **Sprite system (1-bit bitmap blit, lightweight struct)** | **ADOPT** | Needed for richer graphics than line-art. Sprites are `const` → live in flash/XIP, blit directly (no SRAM copy needed; cache-thrash disproven). This is the right primitive for the cat rewrite. |
+| **Sprite system (1-bit bitmap blit, lightweight struct)** | **ADOPT** | Needed for richer graphics than line-art. Sprites are `const` → live in flash/XIP, blit directly (no SRAM copy needed). This is the right primitive for the cat rewrite. **[Corrected after v1.1 HIL]** The *sprite data* in flash is fine; it's the larger *blit-engine code* working set that pressures the XIP cache — handled by pinning the DAP path (`HG_PIN_DAP`), not by changing the sprite layout. |
 | **Ghost Labs "Phantom" mascot + day/night variants (RTC)** | **ADOPT (aesthetic)** | Pure identity/polish; RTC day/night is trivial (we cache the clock). Good for the rewrite the user wants. |
 | **Buzzer soundscapes (boot jingle, error buzz), non-blocking** | **ADOPT** | We have the buzzer HAL (GP29 PWM, non-blocking, serviced off the hot path). Jingles/alerts fit M3.3. |
 | **MicroSD FatFs blackbox logging, non-blocking** | **ALREADY DONE** | That's M2 (the recorder). The UI just reads its snapshot. |
