@@ -101,10 +101,12 @@ Send `{"q":"<cmd>", ...}\n`; you get one JSON line back.
 | | `{"q":"setmacro","i":N,"s":"..."}` | set macro N (persisted to SD) |
 | | `{"q":"baud","v":N}` | change the target-UART baud (validated set; persisted) |
 | **Feedback** | `{"q":"beep"}` / `{"q":"led",...}` / `{"q":"pixel",...}` | buzzer / status LEDs / NeoPixel |
+| | `{"q":"fb"}` | feedback-layer readback — beep count + live NeoPixel colour (diagnostic) |
 | **Companion** | `{"q":"pet"}` | a happy cat beat (heart + chirp) |
 | | `{"q":"summon"}` / `{"q":"banish"}` | force the ghost present / absent (also lets tests drive it) |
 | | `{"q":"exorcise"}` | the exorcism dissolve — a host flasher fires it after a clean reflash |
 | | `{"q":"ghost","on":0/1}` / `{"q":"theme","n":0/1}` | mute the character layer (pure-instrument) / motion density |
+| | `{"q":"ghost"}` (no `on`) | clear a `summon`/`banish` override — return the ghost to AUTO |
 | **Maintenance** | `{"q":"bootsel"}` | reset to BOOTSEL for a hands-free reflash |
 | | `{"q":"wd_arm"}` / `{"q":"wd_reset"}` | software watchdog control |
 

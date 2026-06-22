@@ -178,17 +178,23 @@ Prioritised from a survey→propose→rank pass over the current tree (value / e
   incidental cycle effectively pass). Tooling already exists: run `tests/gates/gate2_cdc.py --replug-rounds 4`
   (3× operator replug + 1 reboot, re-discover the control port by behaviour each time), record the verdict in
   `GATE_RESULTS.md` + `release-readiness.md`. Cheapest un-attested→attested conversion available.
-- [ ] **(5) Cut a tagged v1.1** for the shipped-but-unreleased M-UI overhaul — value HIGH / effort M / risk low.
+- [~] **(5) Cut a tagged v1.1** for the shipped-but-unreleased M-UI overhaul — value HIGH / effort M / risk low.
   The Spectre ghost + sprite engine is the README's headline ("a debug probe with a soul"), but the only
   downloadable release (v1.0) predates ALL of it — anyone flashing the latest release gets a product that
-  doesn't match the README. Date `CHANGELOG [Unreleased]` into a v1.1 entry, write
-  `docs/RELEASE_NOTES_v1.1.md`, fold in the small README doc fixes (the undocumented `{"q":"fb"}`; the
-  `{"q":"ghost"}` no-arg auto-reset behaviour), re-attest build+analyze + relevant HIL on the candidate image,
-  publish via the existing release job. Plan the v1.1 tag deliberately — GitHub immutable-releases permanently
-  burns a tag name once a release uses it (it already forced v1.0.0 → v1.0); expect a local-build/hand-attest
-  path while the self-hosted runner is offline. Optional hardening: a
-  `verify-release.sh` that rebuilds from the tag and diffs the .uf2 sha256 against the published artifact (the
-  "byte-identical rebuild" claim is currently unscripted).
+  doesn't match the README.
+  - [x] **Desk half DONE** *(2026-06-22)*: CHANGELOG `[Unreleased]` → `[1.1] - 2026-06-22` (marked
+    candidate, pending HIL+publish), `docs/RELEASE_NOTES_v1.1.md` written, README doc fixes folded in
+    (`{"q":"fb"}` added; `{"q":"ghost"}` no-arg auto-reset documented). **Candidate built + gated:**
+    `VERSION=1.1.0 BUILD_DIR=/tmp/hg-v110 ./build_fork.sh` → text 173876 / bss 84304; `analyze.sh` PASS
+    (pristine `hackagotchi_dashboard.c`/`cdc1_control.c` 0/0); `.elf` self-reports `1.1.0`.
+  - [ ] **Bench half (operator)**: flash the candidate, re-attest the relevant HIL (the M-UI surfaces —
+    `m3/screen_hil`, `m3/feedback_hil`, `m4/*`, plus `{"q":"fb"}`/`{"q":"ghost"}` behaviour) + a Gate-1
+    0-stall re-soak, record in `release-readiness.md`, then tag **`v1.1`** at the release commit and
+    publish (build with `VERSION=1.1.0` for the byte-identical `.uf2`). Plan the tag deliberately — GitHub
+    immutable-releases permanently burns a tag name once a release uses it (it already forced v1.0.0 → v1.0);
+    drop the "candidate" line from the CHANGELOG v1.1 entry on publish.
+  - [ ] *Optional hardening:* a `verify-release.sh` that rebuilds from the tag and diffs the `.uf2` sha256
+    against the published artifact (the "byte-identical rebuild" claim is currently unscripted).
 - [ ] **(6) Host-CLI convenience wrappers + packaging** — value MED / effort M / risk low *(host-only, can't touch R1)*.
   `host/hackagotchi_ctl.py` wraps only ~6 of ~30 CDC1 verbs. Add thin subcommands for the high-value ones that
   today require hand-echoing JSON: `bootsel` (THE documented hands-free reflash path — handle the no-reply

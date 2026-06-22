@@ -4,7 +4,11 @@ All notable changes to the Hackagotchi C probe firmware (`firmware/c`) are docum
 Format follows [Keep a Changelog](https://keepachangelog.com/); headings are the release tags. The
 firmware's own semver is compiled into the binary and reported by `{"q":"status"}` → `"ver"`.
 
-## [Unreleased]
+## [1.1] - 2026-06-22
+
+_Candidate: the firmware on this commit builds + passes the static-analysis gate; on-hardware
+re-attestation and the GitHub release are pending (see [`docs/release-readiness.md`](docs/release-readiness.md)).
+Drop this line when v1.1 is published._
 
 ### OLED UI overhaul — the cat + Spectre the GhostLabs ghost (M-UI-1..5)
 A full dashboard glow-up where **every flicker of personality is a literal readout of a real
