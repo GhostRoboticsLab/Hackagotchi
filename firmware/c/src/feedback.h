@@ -22,6 +22,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "neopixel_anim.h"   // NP_MOOD_* for feedback_mood()
 
 // Bring up the LED GPIOs + the buzzer PWM slice (silent). Call once in main() before the scheduler.
 void feedback_init(void);
@@ -38,8 +39,17 @@ void feedback_beep(uint16_t hz, uint16_t ms);
 void feedback_led(bool red, bool green);
 
 // Set the NeoPixel to an arbitrary RGB colour (0..255 each; keep modest — one pixel is bright). Safe
-// to call from any task.
+// to call from any task. This drives pixel 0 (the onboard pixel) for back-compat.
 void feedback_pixel(uint8_t r, uint8_t g, uint8_t b);
+
+// --- v1.2 "Companion": external WS2812 chain (HG_NEOPIXEL_COUNT>1) + reactive mood animation ---
+// Set the WHOLE chain to one colour (manual mode). Safe to call from any task.
+void feedback_fill(uint8_t r, uint8_t g, uint8_t b);
+// Switch the chain to an animated MOOD (NP_MOOD_*), serviced each SD-task tick. intensity 0..255 caps
+// brightness. Stays in effect until another mood / a manual pixel set. Safe to call from any task.
+void feedback_mood(int mood, uint8_t intensity);
+int  feedback_pixel_count(void);   // number of WS2812 pixels in the chain (HG_NEOPIXEL_COUNT)
+int  feedback_mood_get(void);      // current mood (NP_MOOD_*), or -1 if in manual mode
 
 // HIL readback ({"q":"fb"}): prove the HAL actually fired on an event (not just the recorder transition).
 uint32_t feedback_beep_count(void);   // beeps STARTED since boot (ticks once per edge-driven beep)
