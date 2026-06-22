@@ -51,6 +51,13 @@ option(HG_PIN_DAP "Pin the DAP/USB transaction hot path into SRAM (XIP-cache-con
 # CI passes the workflow `version` input. Default marks an untagged local/dev build.
 set(HG_VERSION "0.0.0-dev" CACHE STRING "Hackagotchi firmware semver reported by {\"q\":\"status\"}")
 
+# v1.2 "Companion" accessories (CyberBrick kit). ALL feature-gated — the default build (count=1, button
+# OFF, joystick OFF) is behaviourally identical to v1.1 and must be re-gated on hardware before shipping
+# with any of these ON. See docs/private/hackagotchi-v1.2-assembly-guide.html.
+set(HG_NEOPIXEL_COUNT 1 CACHE STRING "WS2812 pixels in the chain (1=onboard only; >1 = external strip on GP12)")
+option(HG_BUTTON   "Enable the momentary button on GP16 (freed onboard green LED)" OFF)
+option(HG_JOYSTICK "Enable the XA011 joystick via ADS1115 on the Grove I2C bus (drops I2C1 to 400 kHz)" OFF)
+
 # [HACKAGOTCHI] M2: carlk3 no-OS-FatFS-SD (SDIO+SPI) for the SD black-box recorder. Fetched by
 # setup.sh into the gitignored upstream/ (same pattern as debugprobe), NOT a submodule. INTERFACE lib;
 # our src/sd/hw_config.c provides the SPI0 pin map. Requires pico_sdk_init() to have run (above).
@@ -85,6 +92,10 @@ add_executable(hackagotchi_probe
         ${CMAKE_CURRENT_LIST_DIR}/src/recorder.c             # M2: black-box recorder core (host-tested)
         ${CMAKE_CURRENT_LIST_DIR}/src/i2c1_bus.c             # I2C1 bring-up (OLED-only, FM+ 1 MHz, no mutex)
         ${CMAKE_CURRENT_LIST_DIR}/src/feedback.c             # M3.0: status LEDs (GP17/16) + buzzer (GP29) HAL
+        ${CMAKE_CURRENT_LIST_DIR}/src/neopixel_anim.c        # v1.2: NeoPixel mood animation (pure, host-tested)
+        ${CMAKE_CURRENT_LIST_DIR}/src/input_logic.c          # v1.2: button debounce + joystick decode (pure)
+        ${CMAKE_CURRENT_LIST_DIR}/src/ads1115.c              # v1.2: ADS1115 I2C ADC (joystick on the Grove bus)
+        ${CMAKE_CURRENT_LIST_DIR}/src/hg_input.c             # v1.2: button (GP16) + joystick HW glue (+0 tasks)
         ${CMAKE_CURRENT_LIST_DIR}/src/hg_config.c            # M4: runtime config store (macros, baud)
         ${CMAKE_CURRENT_LIST_DIR}/src/dap_health.c           # DAP transfer/health witness (via --wrap below)
         # --- pristine upstream debugprobe sources ---
@@ -135,9 +146,18 @@ target_compile_definitions(hackagotchi_probe PRIVATE
         PICO_RP2040_USB_DEVICE_ENUMERATION_FIX=1
         ADVERSARIAL_STALL_MS=${ADVERSARIAL_STALL_MS}
         HG_VERSION="${HG_VERSION}"   # CMake escapes the quotes -> a C string literal
+        HG_NEOPIXEL_COUNT=${HG_NEOPIXEL_COUNT}   # v1.2: WS2812 chain length (default 1 = v1.1 onboard pixel)
 )
 if(ADVERSARIAL_AT_DAP_PRIO)
     target_compile_definitions(hackagotchi_probe PRIVATE ADVERSARIAL_AT_DAP_PRIO=1)
+endif()
+# v1.2 input features (default OFF -> the new modules compile but stay dormant; HG_JOYSTICK also drops the
+# I2C1 bus to 400 kHz in i2c1_bus.h). Re-gate on hardware before shipping with either ON.
+if(HG_BUTTON)
+    target_compile_definitions(hackagotchi_probe PRIVATE HG_BUTTON=1)
+endif()
+if(HG_JOYSTICK)
+    target_compile_definitions(hackagotchi_probe PRIVATE HG_JOYSTICK=1)
 endif()
 
 target_link_libraries(hackagotchi_probe PRIVATE
