@@ -37,6 +37,14 @@ set(ADVERSARIAL_STALL_MS 0 CACHE STRING "Gate-1 adversarial stall (ms) injected 
 # with DAP (the idle-priority stall is preempted in ~50us = a no-op threat). NOT a product config.
 option(ADVERSARIAL_AT_DAP_PRIO "Run the OLED stress task at DAP priority (adversarial contention test)" OFF)
 
+# Pin the CMSIS-DAP / USB-vendor transaction hot path into SRAM (XIP-contention fix). The v1.1 OLED
+# render loop churns the shared 16 KB XIP cache and evicts the flash-resident DAP framing path, adding
+# QSPI refill latency inside the USB-IN response window -> retryable DAP framing desyncs (0 stalls;
+# ~7-15x rate vs v1.0). When ON, a custom linker script (memmap_hackagotchi_pin.ld) routes those 7
+# objects' .text to RAM. Residency change ONLY — no FreeRTOS priority change. Default OFF =
+# byte-identical to the stock XIP product image. See docs/firmware-conventions.md / release-readiness.
+option(HG_PIN_DAP "Pin the DAP/USB transaction hot path into SRAM (XIP-cache-contention fix)" OFF)
+
 # M5: firmware semver compiled into the {"q":"status"} reply so a flashed board self-identifies its
 # release (the git tag / artifact name alone is NOT in the binary). build_fork.sh threads VERSION here;
 # CI passes the workflow `version` input. Default marks an untagged local/dev build.
@@ -147,5 +155,15 @@ target_link_libraries(hackagotchi_probe PRIVATE
 # watchdog HIL pass. Payoff: text+rodata stay in flash instead of being copied to SRAM → free SRAM
 # 35 KB -> 174 KB (+139 KB) for M3. See tests/m2/M2_RESULTS.md "copy_to_ram -> XIP".
 pico_set_binary_type(hackagotchi_probe default)
+
+# [HACKAGOTCHI] HG_PIN_DAP: override the default linker script with our copy that excludes the DAP/USB
+# hot-path objects from flash .text (-> they run from SRAM, out of the contended XIP cache). Must come
+# AFTER pico_set_binary_type (which sets the default script). Keeps XIP-default for everything else; does
+# NOT switch the whole binary to copy_to_ram. Build: HG_PIN_DAP=ON via build_fork.sh (or -DHG_PIN_DAP=ON).
+if(HG_PIN_DAP)
+    pico_set_linker_script(hackagotchi_probe ${CMAKE_CURRENT_LIST_DIR}/memmap_hackagotchi_pin.ld)
+    target_compile_definitions(hackagotchi_probe PRIVATE HG_PIN_DAP=1)  # provenance only (visible in binary_info/strings)
+    message(STATUS "[HACKAGOTCHI] HG_PIN_DAP=ON — DAP/USB hot path pinned to SRAM (memmap_hackagotchi_pin.ld)")
+endif()
 
 pico_add_extra_outputs(hackagotchi_probe)
