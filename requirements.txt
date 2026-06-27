@@ -5,5 +5,5 @@
 # Pure host-side: nothing here touches the device firmware; these just drive the USB-CDC ports.
 
 pyserial==3.5          # the USB-CDC transport for every host script (control + bridge ports)
-Pillow>=11,<12         # OPTIONAL: only `hackagotchi_ctl.py shot` (OLED screenshot -> PNG) uses it;
+Pillow>=12.2.0,<13         # OPTIONAL: only `hackagotchi_ctl.py shot` (OLED screenshot -> PNG) uses it;
                        # without it `shot` falls back to a dependency-free .pgm. Safe to omit.
