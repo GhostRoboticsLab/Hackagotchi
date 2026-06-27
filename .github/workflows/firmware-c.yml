@@ -37,7 +37,7 @@ jobs:
       FWBUILD: ${{ vars.FW_BUILD_DIR || '/opt/fw-build' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Fetch upstream (debugprobe-v2.2.3)
         working-directory: firmware/c
