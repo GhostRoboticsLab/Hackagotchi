@@ -1,12 +1,16 @@
 name: Firmware (C probe fork)
 
-# Manual-only, mirroring PicoInky's firmware.yml: runs on the SHARED self-hosted org runner, so it
-# must never fire on push/PR/tag — only when a human clicks "Run workflow"
-# (or `gh workflow run firmware-c.yml -f version=X.Y.Z`). Politeness contract for a shared runner.
+# Manual-only, mirroring PicoInky's firmware.yml: only fires when a human clicks "Run workflow"
+# (or `gh workflow run firmware-c.yml -f version=X.Y.Z`) — never on push/PR/tag.
+#
+# Hackagotchi is a PUBLIC repo, so it cannot use the org's self-hosted `omen` runner group
+# (private-repos only); GitHub-hosted minutes are free for public repos, so this runs on
+# ubuntu-latest instead. There is no persistent runner-local toolchain cache here, so the pinned
+# Arm GCC 13.3.Rel1 + pico-sdk 2.2.0 (the same versions the proven local build_fork.sh recipe
+# expects) are fetched into a job-local $HOME/fw-build and kept warm across runs with
+# actions/cache.
 #
 # Builds the Hackagotchi probe fork (debugprobe-v2.2.3 overlay) and runs the static-analysis gate.
-# Reuses the same fw-build cache the runner already has (pinned Arm GCC 13.3.Rel1 + pico-sdk 2.2.0),
-# so it matches the proven local build_fork.sh recipe.
 on:
   workflow_dispatch:
     inputs:
@@ -29,21 +33,53 @@ permissions:
 jobs:
   build:
     name: Build + static-analysis gate
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on: ubuntu-latest
     timeout-minutes: 45
-    env:
-      # The self-hosted runner's persistent toolchain/SDK cache (pinned Arm GCC + pico-sdk). Set the
-      # FW_BUILD_DIR repo/Actions variable to the runner's path; the fallback below is only a placeholder.
-      FWBUILD: ${{ vars.FW_BUILD_DIR || '/opt/fw-build' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Configure build paths
+        run: |
+          echo "FW_BUILD_DIR=$HOME/fw-build" >> "$GITHUB_ENV"
+          echo "GCC_DIR=$HOME/fw-build/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi" >> "$GITHUB_ENV"
+          echo "PICO_SDK_PATH=$HOME/fw-build/micropython/lib/pico-sdk" >> "$GITHUB_ENV"
+
+      - name: Cache Arm toolchain + pico-sdk
+        id: fwbuild-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.FW_BUILD_DIR }}
+          key: fwbuild-arm-gnu-13.3.rel1-picosdk-2.2.0-${{ runner.os }}
+
+      - name: Install build dependencies (apt)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build build-essential cppcheck python3
+
+      - name: Install pinned Arm GNU Toolchain 13.3.Rel1 (Linux x86_64)
+        if: steps.fwbuild-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$FW_BUILD_DIR"
+          curl -fsSL -o /tmp/arm-gnu-toolchain.tar.xz \
+            "https://developer.arm.com/-/media/Files/downloads/gnu/13.3.rel1/binrel/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi.tar.xz"
+          tar -xJf /tmp/arm-gnu-toolchain.tar.xz -C "$FW_BUILD_DIR"
+
+      - name: Fetch pico-sdk 2.2.0 (with submodules)
+        if: steps.fwbuild-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$PICO_SDK_PATH")"
+          git clone --branch 2.2.0 --depth 1 --recurse-submodules https://github.com/raspberrypi/pico-sdk.git "$PICO_SDK_PATH"
+
+      - name: Add pinned Arm GCC to PATH
+        run: echo "$GCC_DIR/bin" >> "$GITHUB_PATH"
 
       - name: Fetch upstream (debugprobe-v2.2.3)
         working-directory: firmware/c
         run: |
           set -euo pipefail
-          export PICO_SDK_PATH="${FWBUILD}/micropython/lib/pico-sdk"
           ./setup.sh
 
       - name: Build fork (pinned Arm GCC 13.3 + pico-sdk 2.2.0)
@@ -103,4 +139,4 @@ jobs:
 
   # The portable-logic host tests (SPSC ring, recorder wedge/heartbeat machine, sprite blit) run in the
   # separate, GitHub-HOSTED host-tests.yml (push/PR) — they need no probe, so they don't belong on this
-  # manual self-hosted build job. Each runs its verify-the-verifier break build too, so the check can fail.
+  # manual build job. Each runs its verify-the-verifier break build too, so the check can fail.
