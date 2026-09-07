@@ -47,7 +47,7 @@ jobs:
 
       - name: Cache Arm toolchain + pico-sdk
         id: fwbuild-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.FW_BUILD_DIR }}
           key: fwbuild-arm-gnu-13.3.rel1-picosdk-2.2.0-${{ runner.os }}
